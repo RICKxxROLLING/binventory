@@ -36,9 +36,6 @@ function locText(b) {
   return [b.rack && `Rack ${b.rack}`, b.shelf && `Shelf ${b.shelf}`, b.position && `Pos ${b.position}`].filter(Boolean).join(' · ') || 'No location';
 }
 
-function printLabels(ids) {
-  window.open(`/labels.pdf?ids=${ids.join(',')}`, '_blank');
-}
 
 // Downscale photos on the phone before upload: faster over Wi-Fi, smaller on disk.
 async function shrinkImage(file, max = 1800, quality = 0.84) {
@@ -128,7 +125,7 @@ async function viewList() {
         <a class="card ${state.selected.has(b.id) ? 'selected' : ''}" href="#/bin/${b.id}" data-id="${b.id}">
           <div class="thumb" style="${b.cover ? `background-image:url('/photos/${encodeURIComponent(b.cover)}')` : ''}">${b.cover ? '' : icons.box}</div>
           <div class="body">
-            <div class="meta"><span class="loc">${esc(locText(b))}</span><span class="code">${esc(b.code)}</span></div>
+            <div class="meta"><span class="loc">${esc(locText(b))}</span><span class="code">${esc(b.code)}</span>${labelBadge(b.label)}</div>
             <div class="name">${esc(b.name || 'Untitled bin')}</div>
             ${b.matched_items ? `<div class="match">Contains: ${hl(b.matched_items)}</div>` : `<div class="desc">${esc(b.description) || `${b.item_count} item${b.item_count === 1 ? '' : 's'}`}</div>`}
           </div>
@@ -204,7 +201,11 @@ async function viewBin(id) {
       ${b.tags ? `<div class="section"><h3>Tags</h3><div class="tags">${b.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<a class="tag ${aiTags.has(t.toLowerCase()) ? 'ai' : ''}" href="#/" data-tag="${esc(t)}" ${aiTags.has(t.toLowerCase()) ? 'title="Added by AI"' : ''}>${esc(t)}</a>`).join('')}</div></div>` : ''}
 
       <div class="section">
-        <h3>Label</h3>
+        <h3>Label ${labelBadge(b.label)}</h3>
+        <div class="label-state ${b.label.state}">${b.label.state === 'current'
+          ? `Printed label is up to date${b.label.printedAt ? ` (printed ${new Date(b.label.printedAt + 'Z').toLocaleDateString()})` : ''}.`
+          : b.label.state === 'new' ? 'No label printed yet.'
+          : `The printed label is out of date: ${esc(labelReasons(b.label).join(' · '))}.`}</div>
         <div class="qr-row">
           <img src="/api/bins/${b.id}/qr.svg" alt="QR code">
           <div><div class="code">${esc(b.code)}</div><div class="hint" style="word-break:break-all">${esc(b.url)}</div></div>
@@ -491,11 +492,13 @@ async function route() {
   document.querySelectorAll('.sheet-wrap').forEach(el => el.remove());
   document.body.classList.remove('no-scroll');
   window.scrollTo(0, 0);
+  refreshPrintBadge();
   let m;
   try {
     if (h === '/' || h === '') return await viewList();
     if (h === '/new') return await viewEdit(null);
     if (h === '/settings') return await viewSettings();
+    if (h === '/print') return await viewPrint();
     if (h === '/layout') return await viewLayout();
     if ((m = h.match(/^\/bin\/(\d+)\/edit$/))) return await viewEdit(Number(m[1]));
     if ((m = h.match(/^\/bin\/(\d+)$/))) { state.selecting = false; return await viewBin(Number(m[1])); }

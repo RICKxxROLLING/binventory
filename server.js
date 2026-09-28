@@ -69,7 +69,7 @@ db.exec(`
 
 // Columns added after the first release
 const binCols = new Set(db.prepare('PRAGMA table_info(bins)').all().map(c => c.name));
-for (const col of ['ai_description', 'ai_tags', 'ai_keywords', 'ai_items', 'ai_status', 'ai_error', 'size']) {
+for (const col of ['ai_description', 'ai_tags', 'ai_keywords', 'ai_items', 'ai_status', 'ai_error', 'size', 'label_snapshot', 'label_printed_at']) {
   if (!binCols.has(col)) db.exec(`ALTER TABLE bins ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
 }
 
@@ -103,6 +103,7 @@ const q = {
   renameRack: db.prepare(`UPDATE bins SET rack = ? WHERE rack = ? COLLATE NOCASE`),
   renameSize: db.prepare(`UPDATE bins SET size = ? WHERE size = ?`),
   allItems: db.prepare('SELECT bin_id, name FROM items ORDER BY bin_id, sort, id'),
+  markPrinted: db.prepare(`UPDATE bins SET label_snapshot = ?, label_printed_at = datetime('now') WHERE id = ?`),
   getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
   setSetting: db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
   touch: db.prepare(`UPDATE bins SET updated_at=datetime('now') WHERE id = ?`),
@@ -136,7 +137,32 @@ function fullBin(id) {
   if (!bin) return null;
   let aiItems = [];
   try { aiItems = JSON.parse(bin.ai_items || '[]'); } catch { /* ignore */ }
-  return { ...bin, ai_items: aiItems, items: q.items.all(id), photos: q.photos.all(id) };
+  return { ...withLabel(bin), ai_items: aiItems, items: q.items.all(id), photos: q.photos.all(id) };
+}
+
+// ---------- print tracker ----------
+// A snapshot of exactly what's printed on a label is stored when the user confirms a print;
+// comparing it with the bin now says whether the label on the shelf is new, current or out of date.
+const labelFields = b => ({ rack: b.rack, shelf: b.shelf, position: b.position, name: b.name || 'Untitled bin', description: b.description });
+
+function labelStatus(b) {
+  if (!b.label_snapshot) return { state: 'new', changes: [] };
+  let old;
+  try { old = JSON.parse(b.label_snapshot); } catch { return { state: 'new', changes: [] }; }
+  const now = labelFields(b);
+  const changes = [];
+  if (['rack', 'shelf', 'position'].some(k => (old[k] || '') !== now[k])) {
+    changes.push({ field: 'location', from: [old.rack, old.shelf, old.position].filter(Boolean).join('-'), to: [now.rack, now.shelf, now.position].filter(Boolean).join('-') });
+  }
+  if ((old.name || '') !== now.name) changes.push({ field: 'name', from: old.name || '' });
+  if ((old.description || '') !== now.description) changes.push({ field: 'description', from: old.description || '' });
+  return { state: changes.length ? 'changed' : 'current', changes, printedAt: b.label_printed_at };
+}
+
+// Attach label status and drop the raw snapshot from API responses
+function withLabel(b) {
+  const { label_snapshot, label_printed_at, ...rest } = b;
+  return { ...rest, label: labelStatus(b) };
 }
 
 function cleanBin(body) {
@@ -404,7 +430,28 @@ api.post('/bins/:id/ai-items', (req, res) => {
 api.get('/bins', (req, res) => {
   const term = String(req.query.q || '').trim();
   const rows = term ? q.searchBins.all({ q: `%${term}%` }) : q.listBins.all();
-  res.json(rows);
+  res.json(rows.map(withLabel));
+});
+
+api.get('/print-queue', (_req, res) => {
+  const bins = q.listBins.all().map(b => {
+    const { id, code, name, description, rack, shelf, position, cover } = b;
+    return { id, code, name, description, rack, shelf, position, cover, label: labelStatus(b) };
+  });
+  const count = s => bins.filter(b => b.label.state === s).length;
+  res.json({ bins, counts: { new: count('new'), changed: count('changed'), current: count('current') } });
+});
+
+// Confirm labels came out of the printer: remember what's on them now
+api.post('/labels/printed', (req, res) => {
+  const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Boolean);
+  tx(() => {
+    for (const id of ids) {
+      const b = q.getBin.get(id);
+      if (b) q.markPrinted.run(JSON.stringify(labelFields(b)), id);
+    }
+  });
+  res.json({ marked: ids.length });
 });
 
 api.get('/locations', (_req, res) => {

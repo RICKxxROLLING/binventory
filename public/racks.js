@@ -1,6 +1,6 @@
 'use strict';
 // Rack layout screen, bin size presets, spot suggestions and (re)organizing.
-// Uses api/esc/icons/toast/printLabels/state from app.js (loaded after this file; only called at runtime).
+// Uses api/esc/icons/toast/state from app.js and printLabels from print.js (only called at runtime).
 
 const slotLabel = l => (l.rack ? `Rack ${l.rack} · Shelf ${l.shelf} · Pos ${l.position}` : 'Off the racks');
 const sizeName = s => (s.dims ? `${s.name} (${s.dims})` : s.name);

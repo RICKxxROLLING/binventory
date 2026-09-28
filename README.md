@@ -117,6 +117,12 @@ Moving a bin changes the location printed on its label, so after moving you get 
 ## Printing labels
 
 - From a bin: **Print label**. For many at once: on the main list tap **Select to print**, choose bins, **Print N labels**.
+- **Print tracker** (printer icon in the top bar; the badge counts labels waiting): choose **New only** (bins that never had a label),
+  **New + changed** (also bins whose printed label is out of date because the bin moved, was renamed, or its description changed), or **All**.
+  Untick any you want to skip, then **Print**.
+- After every print you're asked whether the labels came out. Say yes and the tracker records what's on them. Until then they still count as waiting.
+  Moving a bin back to the spot on its label makes it up to date again.
+- Upgrading with labels already on your bins? Open the print tracker once and tap **Mark all as already printed** so only future changes show up.
 - You get a 4×6 in PDF. Print at **100% / Actual size** (not "fit to page").
 - Works with common 4×6 thermal printers (Rollo, Zebra, MUNBYN, Phomemo, etc.). The QR code is vector-drawn so it stays sharp at 203 dpi.
 - On a phone: open the PDF → Share → Print (AirPrint), or send it to a computer with the label printer.

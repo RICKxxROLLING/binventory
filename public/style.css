@@ -273,3 +273,20 @@ label.chip input { position: absolute; opacity: 0; pointer-events: none; }
 .size-row .rm:disabled { opacity: .35; }
 .sheet .form input[type=text], .sheet .form input[type=number] { width: 100%; padding: 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-size: 16px; }
 [hidden] { display: none !important; }
+
+/* print tracker */
+.badge-host { position: relative; }
+.nav-badge { position: absolute; top: 3px; right: 1px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 800; line-height: 18px; text-align: center; }
+.lbl-badge { font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+.lbl-badge.new { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); color: var(--text); border: 1px solid var(--accent); }
+.lbl-badge.changed { background: var(--danger); color: #fff; }
+.section h3 .lbl-badge { letter-spacing: .04em; margin-left: auto; }
+.label-state { font-size: 14px; margin: -2px 0 10px; color: var(--muted); }
+.label-state.changed { color: var(--danger); font-weight: 600; }
+.stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.stat b { display: block; font-size: 24px; line-height: 1.1; }
+.stat span { font-size: 13px; color: var(--muted); }
+.card.plabel { cursor: pointer; align-items: center; }
+.card.plabel input { width: 22px; height: 22px; flex: none; accent-color: var(--accent); margin: 0 2px; }
+.card.plabel .plink { flex: none; font-size: 26px; color: var(--muted); text-decoration: none; padding: 0 6px; }
