@@ -62,12 +62,16 @@ template's Repository to `binventory:latest`.
 
 ## Local AI (auto description + tags)
 
-With a local vision model, every time you add photos to a bin, Binventory sends them to
-[Ollama](https://ollama.com) running on your own hardware (nothing leaves your network) and:
+With a local vision model, whenever you add photos to a bin **or edit what's in it** (name, contents list, notes),
+Binventory sends the photos and your contents list to [Ollama](https://ollama.com) running on your own hardware
+(nothing leaves your network) and:
 
-- **Description**: fills it in if it's empty. If you've written your own, it's never overwritten.
+- **Description**: written by the AI when it's empty, and rewritten whenever the contents change so the label stays accurate.
+  Type your own and it becomes yours: the AI never touches it again. Clear it to hand it back to the AI.
+  Your contents list is treated as the truth, so items packed out of sight still make it into the description and tags.
+  Bins without photos work too, from the contents list alone.
 - **Name**: fills it in if you left it blank, so you can just snap a photo and hit *Create bin*.
-- **Tags**: adds category tags (`cables`, `electrical`, `holiday`...). AI tags are highlighted. Your own tags are kept, and a re-analysis replaces only the previous AI tags.
+- **Tags**: adds category tags (`cables`, `electrical`, `holiday`...), highlighted in the app. Each run replaces the previous AI tags, so tags for things you've taken out disappear. Tags you typed yourself are always kept. Editing only the location or tags doesn't trigger a run.
 - **Spotted by AI**: a list of the objects it identified. These are searchable too, so "HDMI" finds the bin
   even if you never typed it. One tap copies them into the bin's contents.
 

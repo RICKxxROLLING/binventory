@@ -107,7 +107,8 @@ const q = {
     ai_status='done', ai_error='', updated_at=datetime('now') WHERE id=:id`),
   aiQueued: db.prepare(`SELECT id FROM bins WHERE ai_status IN ('pending', 'running') ORDER BY id`),
   aiNeverRun: db.prepare(`SELECT b.id FROM bins b WHERE b.ai_status IN ('', 'error')
-    AND EXISTS (SELECT 1 FROM photos p WHERE p.bin_id = b.id) ORDER BY b.id`),
+    AND (EXISTS (SELECT 1 FROM photos p WHERE p.bin_id = b.id) OR EXISTS (SELECT 1 FROM items i WHERE i.bin_id = b.id))
+    ORDER BY b.id`),
   maxSort: db.prepare('SELECT COALESCE(MAX(sort), -1) AS m FROM items WHERE bin_id = ?'),
   racks: db.prepare(`SELECT DISTINCT rack FROM bins WHERE rack <> '' ORDER BY rack COLLATE NOCASE`),
   shelves: db.prepare(`SELECT DISTINCT shelf FROM bins WHERE shelf <> '' ORDER BY shelf COLLATE NOCASE`),
@@ -156,13 +157,26 @@ function removePhotoFile(filename) {
 }
 
 // ---------- local AI (Ollama vision model) ----------
-const AI_PROMPT = `These photos show the contents of ONE storage bin in a home/garage inventory.
-Catalogue what is in it. Reply with JSON:
+const AI_PROMPT = `You are cataloguing ONE storage bin in a home/garage inventory.
+Reply with JSON:
 - "name": a short title for the bin, 2-5 words (e.g. "Christmas lights", "Bike repair tools")
 - "description": one sentence, at most 20 words, summarising the contents. It is printed on the bin's label.
 - "tags": 3-10 short lowercase category words useful for searching (e.g. "electrical", "holiday", "tools", "cables", "camping")
-- "items": the distinct objects you can identify (up to 25), each with a specific name (e.g. "HDMI cable", "Phillips screwdriver") and an approximate count as "qty"
-Only include things you can actually see. Mention a brand or model only if it is legible.`;
+- "items": the distinct objects you can identify IN THE PHOTOS (up to 25), each with a specific name (e.g. "HDMI cable", "Phillips screwdriver") and an approximate count as "qty". Empty if there are no photos.
+Mention a brand or model only if it is legible or listed.`;
+
+// What the owner typed is the source of truth; photos fill in the rest.
+function binContext(bin, items, photoCount) {
+  const lines = [];
+  lines.push(photoCount ? `${photoCount} photo(s) of the bin's contents are attached.` : 'There are no photos; work only from the information below.');
+  if (bin.name) lines.push(`The owner named the bin: "${bin.name}"`);
+  if (items.length) {
+    lines.push('The owner lists these contents (authoritative; the description and tags must reflect them, including anything not visible in the photos):');
+    items.forEach(i => lines.push(`- ${i.qty}x ${i.name}${i.notes ? ` (${i.notes})` : ''}`));
+  }
+  if (bin.notes) lines.push(`Owner's notes: ${bin.notes.slice(0, 1000)}`);
+  return lines.join('\n');
+}
 
 const AI_SCHEMA = {
   type: 'object',
@@ -192,12 +206,14 @@ function normalizeAi(r) {
   return { name: str(r?.name, 120), description: str(r?.description, 500), tags, items };
 }
 
-async function analyzePhotos(photos) {
+const hasAiInput = id => q.photos.all(id).length > 0 || q.items.all(id).length > 0;
+
+async function analyzeBin(bin, items, photos) {
   const images = photos
     .filter(p => /\.(jpe?g|png|webp)$/i.test(p.filename)) // Ollama can't decode HEIC etc.
     .slice(-AI_MAX_PHOTOS)
     .map(p => fs.readFileSync(path.join(PHOTO_DIR, path.basename(p.filename))).toString('base64'));
-  if (!images.length) throw new Error('No photos in a format the model can read (JPEG/PNG/WebP)');
+  if (!images.length && !items.length) throw new Error('No photos in a format the model can read (JPEG/PNG/WebP)');
   // Streamed so slow CPU-only models don't hit fetch's response-header timeout.
   const res = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
@@ -207,7 +223,7 @@ async function analyzePhotos(photos) {
       stream: true,
       format: AI_SCHEMA,
       options: { temperature: 0.1, num_ctx: AI_NUM_CTX },
-      messages: [{ role: 'user', content: AI_PROMPT, images }],
+      messages: [{ role: 'user', content: `${AI_PROMPT}\n\n${binContext(bin, items, images.length)}`, ...(images.length && { images }) }],
     }),
   });
   if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -218,12 +234,16 @@ async function analyzePhotos(photos) {
     if (chunk.error) throw new Error(`Ollama: ${chunk.error}`);
     content += chunk.message?.content || '';
   }
-  try { return normalizeAi(JSON.parse(content)); }
+  let r;
+  try { r = normalizeAi(JSON.parse(content)); }
   catch { throw new Error('Model did not return valid JSON'); }
+  r.fromPhotos = images.length > 0;
+  return r;
 }
 
 // Merge AI output into the bin without clobbering what the user typed:
-// name/description are filled only if empty (or still the previous AI text),
+// name is filled only if empty; the description is AI-owned while it's empty or still the
+// previous AI text (typing your own takes it over, clearing it hands it back);
 // tags from the previous AI run are replaced, the user's own tags are kept.
 function applyAi(id, r) {
   const bin = q.getBin.get(id);
@@ -242,8 +262,9 @@ function applyAi(id, r) {
     tags: tags.join(', '),
     ai_description: r.description,
     ai_tags: r.tags.join(', '),
-    ai_keywords: r.items.map(i => i.name).join(', '),
-    ai_items: JSON.stringify(r.items),
+    // A text-only run can't see anything, so keep what the last photo run spotted
+    ai_keywords: r.fromPhotos ? r.items.map(i => i.name).join(', ') : bin.ai_keywords,
+    ai_items: r.fromPhotos ? JSON.stringify(r.items) : bin.ai_items,
   });
 }
 
@@ -262,13 +283,15 @@ async function drainAi() {
   while (aiQueue.length) {
     const id = aiQueue.shift();
     try {
-      const photos = q.photos.all(id);
-      if (!q.getBin.get(id)) continue;
-      if (!photos.length) { q.setAiStatus.run('', '', id); continue; }
+      const bin = q.getBin.get(id);
+      if (!bin) continue;
+      if (!hasAiInput(id)) { q.setAiStatus.run('', '', id); continue; }
       q.setAiStatus.run('running', '', id);
       const started = Date.now();
-      const result = await analyzePhotos(photos);
+      const result = await analyzeBin(bin, q.items.all(id), q.photos.all(id));
       applyAi(id, result);
+      // Edited again while this ran: another pass is queued, so don't report 'done' yet
+      if (aiQueue.includes(id)) q.setAiStatus.run('pending', '', id);
       console.log(`AI: analyzed bin ${id} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
     } catch (e) {
       const msg = e.cause?.code === 'ECONNREFUSED' ? `Can't reach Ollama at ${OLLAMA_URL}` : e.message;
@@ -342,7 +365,7 @@ api.post('/bins/:id/analyze', (req, res) => {
   const id = Number(req.params.id);
   if (!OLLAMA_URL) return res.status(400).json({ error: 'AI is not configured (set OLLAMA_URL)' });
   if (!q.getBin.get(id)) return res.status(404).json({ error: 'Not found' });
-  if (!q.photos.all(id).length) return res.status(400).json({ error: 'Add a photo first' });
+  if (!hasAiInput(id)) return res.status(400).json({ error: 'Add a photo or some contents first' });
   queueAnalysis(id);
   res.json(fullBin(id));
 });
@@ -384,6 +407,7 @@ api.post('/bins', (req, res) => {
     saveItems(newId, req.body.items);
     return newId;
   });
+  if (AI_AUTO && q.items.all(id).length) queueAnalysis(id);
   res.status(201).json(fullBin(id));
 });
 
@@ -396,11 +420,16 @@ api.get('/bins/:id', (req, res) => {
 
 api.put('/bins/:id', (req, res) => {
   const id = Number(req.params.id);
-  if (!q.getBin.get(id)) return res.status(404).json({ error: 'Not found' });
+  const before = fullBin(id);
+  if (!before) return res.status(404).json({ error: 'Not found' });
   tx(() => {
     q.updateBin.run({ ...cleanBin(req.body), id });
     saveItems(id, req.body.items);
   });
+  const after = fullBin(id);
+  // Re-describe/re-tag when what's in the bin changed (not for location or tag-only edits)
+  const sig = b => JSON.stringify([b.name, b.notes, b.items.map(i => [i.name, i.qty, i.notes])]);
+  if (AI_AUTO && sig(before) !== sig(after) && hasAiInput(id)) queueAnalysis(id);
   res.json(fullBin(id));
 });
 

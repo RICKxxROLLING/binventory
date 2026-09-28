@@ -195,3 +195,4 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 1
 .ai-busy { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
 .ai-busy svg { color: var(--accent); animation: ai-pulse 1.2s ease-in-out infinite; }
 @keyframes ai-pulse { 50% { opacity: .35; transform: scale(.85); } }
+.hint svg { vertical-align: -3px; color: var(--accent); }

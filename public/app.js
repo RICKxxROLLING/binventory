@@ -197,7 +197,7 @@ async function viewBin(id) {
         : '<div class="hint">No items listed.</div>'}
       </div>
 
-      ${cfg.ai.enabled && b.photos.length ? aiSection(b, aiBusy) : ''}
+      ${cfg.ai.enabled && (b.photos.length || b.items.length) ? aiSection(b, aiBusy) : ''}
 
       ${b.notes ? `<div class="section"><h3>Notes</h3><div class="notes">${esc(b.notes)}</div></div>` : ''}
       ${b.tags ? `<div class="section"><h3>Tags</h3><div class="tags">${b.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<a class="tag ${aiTags.has(t.toLowerCase()) ? 'ai' : ''}" href="#/" data-tag="${esc(t)}" ${aiTags.has(t.toLowerCase()) ? 'title="Added by AI"' : ''}>${esc(t)}</a>`).join('')}</div></div>` : ''}
@@ -251,15 +251,16 @@ function aiSection(b, busy) {
   const have = new Set(b.items.map(i => i.name.toLowerCase()));
   const missing = b.ai_items.filter(i => !have.has(i.name.toLowerCase()));
   let body;
-  if (busy) body = `<div class="ai-busy">${icons.spark} ${b.ai_status === 'running' ? 'Looking at the photos…' : 'Waiting for the AI…'}</div>`;
+  if (busy) body = `<div class="ai-busy">${icons.spark} ${b.ai_status === 'running' ? (b.photos.length ? 'Looking at the photos and contents…' : 'Reading the contents…') : 'Waiting for the AI…'}</div>`;
   else if (b.ai_status === 'error') body = `<div class="hint" style="margin:0">AI couldn't analyze this bin: ${esc(b.ai_error)}</div>`;
   else if (b.ai_items.length) body = `
     <div class="tags">${b.ai_items.map(i => `<span class="tag ai">${i.qty > 1 ? `${i.qty}× ` : ''}${esc(i.name)}</span>`).join('')}</div>
     ${missing.length ? `<button class="btn" id="aiAdd" style="margin-top:10px;min-height:36px">${icons.plus} Add ${missing.length} to contents</button>` : ''}`;
+  else if (b.ai_status === 'done') body = '<div class="hint" style="margin:0">Description and tags are written from the contents list. Add a photo and it will spot items too.</div>';
   else body = '<div class="hint" style="margin:0">Not analyzed yet.</div>';
   return `
     <div class="section">
-      <h3>Spotted by AI
+      <h3>${b.ai_items.length ? 'Spotted by AI' : 'AI'}
         ${busy ? '' : `<button class="btn" id="aiRun" style="min-height:36px;padding:6px 12px">${icons.spark} ${b.ai_status ? 'Re-analyze' : 'Analyze'}</button>`}
       </h3>
       ${body}
@@ -295,7 +296,8 @@ async function viewEdit(id) {
         <datalist id="shelves">${locs.shelves.map(r => `<option value="${esc(r)}">`).join('')}</datalist>
       </div>
       <div class="field"><label>Name</label><input type="text" name="name" placeholder="${aiAuto ? 'Leave blank to let AI name it from the photos' : 'e.g. Christmas lights'}" value="${esc(b.name)}" ${aiAuto ? '' : 'required'}></div>
-      <div class="field"><label>General description (printed on label)</label><textarea name="description" rows="2" placeholder="${aiAuto ? 'Leave blank to let AI describe it from the photos' : 'e.g. Outdoor string lights, extension cords, timers'}">${esc(b.description)}</textarea></div>
+      <div class="field"><label>General description (printed on label)</label><textarea name="description" rows="2" placeholder="${aiAuto ? 'Leave blank to let AI write it' : 'e.g. Outdoor string lights, extension cords, timers'}">${esc(b.description)}</textarea>
+        ${aiAuto && b.description && b.description === b.ai_description ? `<div class="hint">${icons.spark} Written by AI. It's rewritten when the contents change; edit it to keep your own wording.</div>` : ''}</div>
 
       <div class="field">
         <label>Contents</label>
@@ -393,7 +395,8 @@ async function viewEdit(id) {
       data.items = items;
       const saved = await api(isNew ? '/bins' : `/bins/${id}`, { method: isNew ? 'POST' : 'PUT', body: data });
       if (pending.length) { btn.textContent = 'Uploading photos…'; await uploadPhotos(saved.id, pending); }
-      toast(isNew ? `Created ${saved.code}` : 'Saved');
+      const aiWorking = saved.ai_status === 'pending' || saved.ai_status === 'running' || (aiAuto && pending.length);
+      toast((isNew ? `Created ${saved.code}` : 'Saved') + (aiWorking ? ' · AI is updating the description and tags…' : ''));
       location.hash = `#/bin/${saved.id}`;
     } catch (err) {
       toast('Error: ' + err.message);
