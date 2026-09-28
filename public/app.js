@@ -12,6 +12,10 @@ async function api(path, opts = {}) {
     headers: opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined,
     body: opts.body && !(opts.body instanceof FormData) ? JSON.stringify(opts.body) : opts.body,
   });
+  if (res.status === 401) {
+    location.href = '/login?next=' + encodeURIComponent('/' + location.hash);
+    throw new Error('Sign in required');
+  }
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
   return res.json();
 }
@@ -411,6 +415,14 @@ async function viewSettings() {
     <div class="section">
       <h3>Printing</h3>
       <div class="hint" style="margin:0">Labels are 4×6 in PDFs, one bin per page. Print at <b>100% / actual size</b> (not “fit to page”) on your thermal label printer. From a phone, open the PDF and use Share → Print.</div>
+    </div>
+    <div class="section">
+      <h3>Security
+        ${cfg.auth.enabled ? '<a class="btn" href="/logout" style="min-height:36px;padding:6px 12px">Sign out</a>' : ''}
+      </h3>
+      <div class="hint" style="margin:0">${cfg.auth.enabled
+        ? `Signed in as <b>${esc(cfg.auth.user)}</b>. Login is required and sessions last ${cfg.auth.days} days per device (changing <code>AUTH_PASS</code> signs every device out).`
+        : 'No login set, so only devices on your home network (or Tailscale) can open Binventory. To reach it from outside, set <code>AUTH_USER</code> and <code>AUTH_PASS</code> on the container.'}</div>
     </div>
     <div class="section" id="aiSettings">
       <h3>Local AI</h3>

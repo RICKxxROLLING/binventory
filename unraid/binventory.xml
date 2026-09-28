@@ -17,10 +17,11 @@
   <Config Name="Data" Target="/data" Default="/mnt/user/appdata/binventory" Mode="rw" Description="Database and photos" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/binventory</Config>
   <Config Name="BASE_URL" Target="BASE_URL" Default="" Mode="" Description="URL phones use to reach this app, e.g. http://192.168.1.10:8080. Encoded into every QR code." Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.10:8080</Config>
   <Config Name="BIN_PREFIX" Target="BIN_PREFIX" Default="BIN" Mode="" Description="Prefix for bin codes (BIN-0001)" Type="Variable" Display="always" Required="false" Mask="false">BIN</Config>
-  <Config Name="AUTH_USER" Target="AUTH_USER" Default="" Mode="" Description="Optional login username" Type="Variable" Display="advanced" Required="false" Mask="false"/>
-  <Config Name="AUTH_PASS" Target="AUTH_PASS" Default="" Mode="" Description="Optional login password" Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="AUTH_USER" Target="AUTH_USER" Default="" Mode="" Description="Login username. Required for remote access (without a login only LAN/Tailscale devices can connect)." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="AUTH_PASS" Target="AUTH_PASS" Default="" Mode="" Description="Login password. Use a long one if this is reachable from the internet." Type="Variable" Display="always" Required="false" Mask="true"/>
   <Config Name="OLLAMA_URL" Target="OLLAMA_URL" Default="" Mode="" Description="Optional local AI: Ollama address, e.g. http://192.168.1.10:11434. Photos are analyzed to fill in the description and search tags. Blank = off." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="OLLAMA_MODEL" Target="OLLAMA_MODEL" Default="gemma3:4b" Mode="" Description="Ollama vision model (run: ollama pull gemma3:4b)" Type="Variable" Display="always" Required="false" Mask="false">gemma3:4b</Config>
   <Config Name="AI_AUTO" Target="AI_AUTO" Default="true" Mode="" Description="Analyze photos automatically on upload (true/false)" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="SESSION_DAYS" Target="SESSION_DAYS" Default="90" Mode="" Description="Days a device stays signed in" Type="Variable" Display="advanced" Required="false" Mask="false">90</Config>
   <Config Name="TZ" Target="TZ" Default="America/Los_Angeles" Mode="" Description="Timezone" Type="Variable" Display="advanced" Required="false" Mask="false">America/Los_Angeles</Config>
 </Container>

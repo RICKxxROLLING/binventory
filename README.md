@@ -48,7 +48,10 @@ template's Repository to `binventory:latest`.
 |--------------|---------|---------|
 | `BASE_URL`   | request host | URL encoded in QR codes. **Set this.** |
 | `BIN_PREFIX` | `BIN`   | Bin code prefix → `BIN-0001` |
-| `AUTH_USER` / `AUTH_PASS` | empty | Optional login (HTTP basic auth). Leave blank on a trusted LAN. |
+| `AUTH_USER` / `AUTH_PASS` | empty | Login. **Required for access from outside your home network** (see below). |
+| `SESSION_DAYS` | `90` | How long a device stays signed in |
+| `TRUST_PROXY` | `loopback, linklocal, uniquelocal` | Which reverse proxies' `X-Forwarded-For` to believe (Express syntax) |
+| `ALLOW_PUBLIC_NO_AUTH` | `false` | Allow non-LAN clients with no login. Don't. |
 | `PORT`       | `8080`  | Internal port |
 | `DATA_DIR`   | `/data` | Database + photo storage |
 | `OLLAMA_URL` | empty   | Ollama address, e.g. `http://192.168.1.10:11434`. Blank = AI off. |
@@ -96,9 +99,40 @@ Photos in HEIC that the phone couldn't convert are skipped (the app normally upl
 
 QR codes point at `BASE_URL/b/BIN-0001`. The link uses the bin **code**, not its database row, so it keeps working after you edit a bin.
 
-If you later change how you reach the server (e.g. add Tailscale or a reverse proxy with a domain), update `BASE_URL` and reprint. Or set it to that permanent address from the start (e.g. your Tailscale MagicDNS name, `http://tower:8080`) so labels never need reprinting.
+If you later change how you reach the server, update `BASE_URL` and reprint. Or set it to the permanent address from the start
+(e.g. your Tailscale name `http://tower:8080`, or `https://bins.example.com`) so labels never need reprinting.
 
-Don't expose this directly to the internet without `AUTH_USER`/`AUTH_PASS` plus HTTPS through a reverse proxy (SWAG, Nginx Proxy Manager) or a VPN like Tailscale/WireGuard.
+### Built-in protection
+
+- **No login set** → Binventory only answers devices on your home network and Tailscale (private IPs).
+  Anything else gets *403*, so accidentally forwarding the port doesn't publish your inventory.
+- **`AUTH_USER` + `AUTH_PASS` set** → a login page protects everything: pages, API, photos and label PDFs.
+  Each phone signs in once and stays signed in for `SESSION_DAYS` (it works from a home-screen app too).
+  Scanning a label while signed out goes to the login page, then straight to that bin.
+  - After 10 wrong passwords, that IP is locked out for 15 minutes; failed logins are logged in the container log.
+  - Changing `AUTH_PASS` signs every device out. **Settings → Sign out** signs out the current device.
+  - Sessions are signed with a random key stored in `/data/session.secret`.
+  - Scripts can still use HTTP basic auth (`curl -u user:pass .../api/export`).
+- Security headers (CSP, no framing, nosniff; HSTS when served over HTTPS) are always on.
+
+Use a long password (a few random words). It's the only thing between the internet and your inventory.
+
+### Option A: Tailscale (easiest, nothing exposed to the internet)
+
+1. Install Tailscale on Unraid (built in on Unraid 7: **Settings → Tailscale**; otherwise the Tailscale plugin) and on your phone.
+2. Set `BASE_URL` to `http://<unraid-tailscale-name>:8080` (MagicDNS) so QR codes work both at home and away.
+
+Tailscale devices count as "local", so a login is optional here. Set one anyway if other people share your tailnet.
+
+### Option B: Public HTTPS via a reverse proxy (Nginx Proxy Manager, SWAG, Cloudflare Tunnel)
+
+1. Set `AUTH_USER` and `AUTH_PASS` first. Without them, the proxied requests are refused (403).
+2. Point a proxy host (e.g. `bins.example.com`) at `http://<unraid-ip>:8080` with a Let's Encrypt certificate and *Force SSL*.
+3. Set `BASE_URL=https://bins.example.com` and reprint the labels.
+
+Proxies on your LAN or Docker network are trusted automatically for the real client IP. If yours lives
+somewhere else (e.g. on a VPS reached over a VPN), add its address to `TRUST_PROXY`.
+Never forward port 8080 straight from your router: that would send the password over plain HTTP.
 
 ## Backup
 

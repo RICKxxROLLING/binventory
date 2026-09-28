@@ -11,7 +11,7 @@ services:
       - BASE_URL=http://192.168.1.10:8080
       - BIN_PREFIX=BIN
       - TZ=America/Los_Angeles
-      # Optional login (leave blank for none)
+      # Login. Required for access from outside your LAN (without it only LAN/Tailscale IPs are allowed)
       - AUTH_USER=
       - AUTH_PASS=
       # Optional local AI (Ollama vision model) that describes and tags bins from their photos

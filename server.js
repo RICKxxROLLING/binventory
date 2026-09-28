@@ -8,6 +8,7 @@ const multer = require('multer');
 const QRCode = require('qrcode');
 const PDFDocument = require('pdfkit');
 const { DatabaseSync } = require('node:sqlite');
+const { setupAuth } = require('./auth');
 
 // ---------- config ----------
 const PORT = parseInt(process.env.PORT || '8080', 10);
@@ -15,8 +16,6 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const PHOTO_DIR = path.join(DATA_DIR, 'photos');
 const BASE_URL = (process.env.BASE_URL || '').replace(/\/+$/, '');
 const BIN_PREFIX = process.env.BIN_PREFIX || 'BIN';
-const AUTH_USER = process.env.AUTH_USER || '';
-const AUTH_PASS = process.env.AUTH_PASS || '';
 // Local AI (Ollama). Blank OLLAMA_URL = AI features off.
 const OLLAMA_URL = (process.env.OLLAMA_URL || '').replace(/\/+$/, '');
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b';
@@ -284,22 +283,12 @@ if (OLLAMA_URL) q.aiQueued.all().forEach(r => queueAnalysis(r.id));
 
 // ---------- app ----------
 const app = express();
-app.set('trust proxy', true);
+// Only believe X-Forwarded-For from proxies on the local network (Nginx Proxy Manager, SWAG,
+// cloudflared...). Trusting it from anyone would let a remote client fake a LAN address.
+app.set('trust proxy', process.env.TRUST_PROXY || 'loopback, linklocal, uniquelocal');
 app.use(express.json({ limit: '1mb' }));
 
-// Optional HTTP basic auth (phones remember it after first login)
-if (AUTH_USER && AUTH_PASS) {
-  const expected = Buffer.from(`${AUTH_USER}:${AUTH_PASS}`);
-  app.use((req, res, next) => {
-    if (req.path === '/healthz') return next();
-    const hdr = req.headers.authorization || '';
-    const given = Buffer.from(hdr.startsWith('Basic ') ? Buffer.from(hdr.slice(6), 'base64').toString() : '');
-    if (given.length === expected.length && crypto.timingSafeEqual(given, expected)) return next();
-    res.set('WWW-Authenticate', 'Basic realm="Binventory"').status(401).send('Authentication required');
-  });
-}
-
-app.get('/healthz', (_req, res) => res.send('ok'));
+const auth = setupAuth(app, { dataDir: DATA_DIR });
 app.use('/photos', express.static(PHOTO_DIR, { maxAge: '30d', immutable: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -322,6 +311,7 @@ const api = express.Router();
 api.get('/config', (req, res) => res.json({
   baseUrl: baseUrl(req), prefix: BIN_PREFIX, baseUrlSet: !!BASE_URL,
   ai: { enabled: !!OLLAMA_URL, auto: AI_AUTO, model: OLLAMA_MODEL },
+  auth: { enabled: auth.enabled, user: auth.user, days: auth.days },
 }));
 
 api.get('/ai/status', async (_req, res) => {
