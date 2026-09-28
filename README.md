@@ -132,6 +132,8 @@ Moving a bin changes the location printed on its label, so after moving you get 
 - Upgrading with labels already on your bins? Open the print tracker once and tap **Mark all as already printed** so only future changes show up.
 - You get a 4×6 in PDF. Print at **100% / Actual size** (not "fit to page").
 - Works with common 4×6 thermal printers (Rollo, Zebra, MUNBYN, Phomemo, etc.). The QR code is vector-drawn so it stays sharp at 203 dpi.
+- The Binventory logo sits in the middle of the QR code (black and white on labels). The code uses the highest error correction
+  so the logo doesn't affect scanning. With an unusually long `BASE_URL` (over ~70 characters) the logo is left out to keep the code easy to scan.
 - On a phone: open the PDF → Share → Print (AirPrint), or send it to a computer with the label printer.
 
 ## QR codes and reaching the app away from home

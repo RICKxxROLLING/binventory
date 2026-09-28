@@ -687,8 +687,7 @@ api.delete('/photos/:id', (req, res) => {
 api.get('/bins/:id/qr.svg', async (req, res) => {
   const bin = q.getBin.get(req.params.id);
   if (!bin) return res.status(404).end();
-  const svg = await QRCode.toString(binUrl(req, bin), { type: 'svg', margin: 1, errorCorrectionLevel: 'M' });
-  res.type('image/svg+xml').send(svg);
+  res.type('image/svg+xml').send(qrSvg(binUrl(req, bin)));
 });
 
 api.get('/export', (_req, res) => {
@@ -711,18 +710,67 @@ function fitText(doc, text, { font, maxSize, minSize, width, height }) {
   return minSize;
 }
 
-function drawQR(doc, text, x, y, size) {
-  const qr = QRCode.create(text, { errorCorrectionLevel: 'M' });
+// QR with room for the logo in the middle. Error correction H recovers up to 30% of the code, and the
+// logo hides well under 10%. From version 7 up an alignment pattern sits dead centre, so very long
+// URLs get a plain code instead.
+function qrWithLogo(text) {
+  let qr = QRCode.create(text, { errorCorrectionLevel: 'H' });
+  const withLogo = qr.version <= 6;
+  // No logo possible: use the lighter level so the code stays coarse and easy to scan
+  if (!withLogo) qr = QRCode.create(text, { errorCorrectionLevel: 'M' });
   const n = qr.modules.size;
+  let hole = null;
+  if (withLogo) {
+    let k = Math.ceil(n * 0.24);
+    if ((n - k) % 2) k++;
+    hole = { start: (n - k) / 2, size: k };
+  }
+  const dark = (r, c) => qr.modules.get(r, c) && !(hole && r >= hole.start && r < hole.start + hole.size && c >= hole.start && c < hole.start + hole.size);
+  return { n, dark, hole };
+}
+
+// The Binventory box glyph (from icon.svg, 64x64 units), in a 1-bit version for thermal labels
+function drawLogoMono(doc, x, y, size) {
+  const k = size / 64;
+  doc.save().translate(x, y).scale(k);
+  doc.roundedRect(1.5, 1.5, 61, 61, 13).lineWidth(3).strokeColor('#000').stroke();
+  doc.path('M12 24h40v26a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4z').fill('#000');
+  doc.roundedRect(9, 16, 46, 10, 3).fill('#000');
+  doc.roundedRect(24, 33, 16, 6, 3).fill('#fff');
+  doc.restore();
+}
+
+function drawQR(doc, text, x, y, size) {
+  const { n, dark, hole } = qrWithLogo(text);
   const cell = size / n;
   doc.save().fillColor('#000');
   for (let r = 0; r < n; r++) {
     for (let c = 0; c < n; c++) {
       // slight overdraw avoids hairline gaps on thermal printers
-      if (qr.modules.get(r, c)) doc.rect(x + c * cell, y + r * cell, cell + 0.2, cell + 0.2);
+      if (dark(r, c)) doc.rect(x + c * cell, y + r * cell, cell + 0.2, cell + 0.2);
     }
   }
   doc.fill().restore();
+  if (hole) {
+    const pad = cell * 0.6;
+    drawLogoMono(doc, x + hole.start * cell + pad, y + hole.start * cell + pad, hole.size * cell - pad * 2);
+  }
+}
+
+// Same code as an SVG for the screen, with the full-colour logo
+function qrSvg(text) {
+  const { n, dark, hole } = qrWithLogo(text);
+  const m = 1; // quiet zone, in modules
+  let d = '';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (dark(r, c)) d += `M${c + m} ${r + m}h1v1h-1z`;
+  const logo = hole
+    ? (() => {
+      const pad = 0.6, s = (hole.size - pad * 2) / 64, o = hole.start + m + pad;
+      return `<g transform="translate(${o} ${o}) scale(${s})"><rect width="64" height="64" rx="14" fill="#f5a524"/><path d="M12 24h40v26a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4z" fill="#111418"/><rect x="9" y="16" width="46" height="10" rx="3" fill="#111418"/><rect x="24" y="33" width="16" height="6" rx="3" fill="#f5a524"/></g>`;
+    })()
+    : '';
+  const w = n + m * 2;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${w}" shape-rendering="crispEdges"><rect width="${w}" height="${w}" fill="#fff"/><path d="${d}" fill="#000"/>${logo}</svg>`;
 }
 
 function drawLabel(doc, bin, url) {
