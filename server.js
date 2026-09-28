@@ -17,6 +17,11 @@ const BASE_URL = (process.env.BASE_URL || '').replace(/\/+$/, '');
 const BIN_PREFIX = process.env.BIN_PREFIX || 'BIN';
 const AUTH_USER = process.env.AUTH_USER || '';
 const AUTH_PASS = process.env.AUTH_PASS || '';
+// Local AI (Ollama). Blank OLLAMA_URL = AI features off.
+const OLLAMA_URL = (process.env.OLLAMA_URL || '').replace(/\/+$/, '');
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b';
+const AI_AUTO = !/^(0|false|no|off)$/i.test(process.env.AI_AUTO || '');
+const AI_MAX_PHOTOS = Math.max(1, parseInt(process.env.AI_MAX_PHOTOS || '4', 10) || 4);
 
 fs.mkdirSync(PHOTO_DIR, { recursive: true });
 
@@ -56,6 +61,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_photos_bin ON photos(bin_id);
 `);
 
+// Columns added after the first release
+const binCols = new Set(db.prepare('PRAGMA table_info(bins)').all().map(c => c.name));
+for (const col of ['ai_description', 'ai_tags', 'ai_keywords', 'ai_items', 'ai_status', 'ai_error']) {
+  if (!binCols.has(col)) db.exec(`ALTER TABLE bins ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
+}
+
 const q = {
   listBins: db.prepare(`
     SELECT b.*,
@@ -70,7 +81,7 @@ const q = {
       (SELECT group_concat(i.name, ', ') FROM items i WHERE i.bin_id = b.id AND i.name LIKE :q) AS matched_items
     FROM bins b
     WHERE b.code LIKE :q OR b.name LIKE :q OR b.description LIKE :q OR b.notes LIKE :q
-       OR b.tags LIKE :q OR b.rack LIKE :q OR b.shelf LIKE :q
+       OR b.tags LIKE :q OR b.rack LIKE :q OR b.shelf LIKE :q OR b.ai_keywords LIKE :q
        OR EXISTS (SELECT 1 FROM items i WHERE i.bin_id = b.id AND (i.name LIKE :q OR i.notes LIKE :q))
     ORDER BY b.rack COLLATE NOCASE, b.shelf COLLATE NOCASE, b.position COLLATE NOCASE, b.id`),
   getBin: db.prepare('SELECT * FROM bins WHERE id = ?'),
@@ -89,6 +100,14 @@ const q = {
   insertPhoto: db.prepare('INSERT INTO photos (bin_id, filename) VALUES (?, ?)'),
   getPhoto: db.prepare('SELECT * FROM photos WHERE id = ?'),
   deletePhoto: db.prepare('DELETE FROM photos WHERE id = ?'),
+  setAiStatus: db.prepare('UPDATE bins SET ai_status = ?, ai_error = ? WHERE id = ?'),
+  applyAi: db.prepare(`UPDATE bins SET name=:name, description=:description, tags=:tags,
+    ai_description=:ai_description, ai_tags=:ai_tags, ai_keywords=:ai_keywords, ai_items=:ai_items,
+    ai_status='done', ai_error='', updated_at=datetime('now') WHERE id=:id`),
+  aiQueued: db.prepare(`SELECT id FROM bins WHERE ai_status IN ('pending', 'running') ORDER BY id`),
+  aiNeverRun: db.prepare(`SELECT b.id FROM bins b WHERE b.ai_status IN ('', 'error')
+    AND EXISTS (SELECT 1 FROM photos p WHERE p.bin_id = b.id) ORDER BY b.id`),
+  maxSort: db.prepare('SELECT COALESCE(MAX(sort), -1) AS m FROM items WHERE bin_id = ?'),
   racks: db.prepare(`SELECT DISTINCT rack FROM bins WHERE rack <> '' ORDER BY rack COLLATE NOCASE`),
   shelves: db.prepare(`SELECT DISTINCT shelf FROM bins WHERE shelf <> '' ORDER BY shelf COLLATE NOCASE`),
 };
@@ -102,7 +121,9 @@ function tx(fn) {
 function fullBin(id) {
   const bin = q.getBin.get(id);
   if (!bin) return null;
-  return { ...bin, items: q.items.all(id), photos: q.photos.all(id) };
+  let aiItems = [];
+  try { aiItems = JSON.parse(bin.ai_items || '[]'); } catch { /* ignore */ }
+  return { ...bin, ai_items: aiItems, items: q.items.all(id), photos: q.photos.all(id) };
 }
 
 function cleanBin(body) {
@@ -132,6 +153,132 @@ function saveItems(binId, items) {
 function removePhotoFile(filename) {
   fs.rm(path.join(PHOTO_DIR, path.basename(filename)), { force: true }, () => {});
 }
+
+// ---------- local AI (Ollama vision model) ----------
+const AI_PROMPT = `These photos show the contents of ONE storage bin in a home/garage inventory.
+Catalogue what is in it. Reply with JSON:
+- "name": a short title for the bin, 2-5 words (e.g. "Christmas lights", "Bike repair tools")
+- "description": one sentence, at most 20 words, summarising the contents. It is printed on the bin's label.
+- "tags": 3-10 short lowercase category words useful for searching (e.g. "electrical", "holiday", "tools", "cables", "camping")
+- "items": the distinct objects you can identify (up to 25), each with a specific name (e.g. "HDMI cable", "Phillips screwdriver") and an approximate count as "qty"
+Only include things you can actually see. Mention a brand or model only if it is legible.`;
+
+const AI_SCHEMA = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    description: { type: 'string' },
+    tags: { type: 'array', items: { type: 'string' } },
+    items: {
+      type: 'array',
+      items: { type: 'object', properties: { name: { type: 'string' }, qty: { type: 'integer' } }, required: ['name', 'qty'] },
+    },
+  },
+  required: ['name', 'description', 'tags', 'items'],
+};
+
+const splitTags = s => String(s || '').split(',').map(t => t.trim()).filter(Boolean);
+
+function normalizeAi(r) {
+  const str = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+  const tags = [...new Set((Array.isArray(r?.tags) ? r.tags : [])
+    .map(t => str(t, 30).toLowerCase().replace(/^#/, '').replace(/,/g, ' ').trim()).filter(Boolean))].slice(0, 10);
+  const seen = new Set();
+  const items = (Array.isArray(r?.items) ? r.items : []).map(i => ({
+    name: str(i?.name, 100),
+    qty: Math.max(1, Math.min(9999, parseInt(i?.qty, 10) || 1)),
+  })).filter(i => i.name && !seen.has(i.name.toLowerCase()) && seen.add(i.name.toLowerCase())).slice(0, 25);
+  return { name: str(r?.name, 120), description: str(r?.description, 500), tags, items };
+}
+
+async function analyzePhotos(photos) {
+  const images = photos
+    .filter(p => /\.(jpe?g|png|webp)$/i.test(p.filename)) // Ollama can't decode HEIC etc.
+    .slice(-AI_MAX_PHOTOS)
+    .map(p => fs.readFileSync(path.join(PHOTO_DIR, path.basename(p.filename))).toString('base64'));
+  if (!images.length) throw new Error('No photos in a format the model can read (JPEG/PNG/WebP)');
+  // Streamed so slow CPU-only models don't hit fetch's response-header timeout.
+  const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      stream: true,
+      format: AI_SCHEMA,
+      options: { temperature: 0.1 },
+      messages: [{ role: 'user', content: AI_PROMPT, images }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  let content = '';
+  for (const line of (await res.text()).split('\n')) {
+    if (!line.trim()) continue;
+    const chunk = JSON.parse(line);
+    if (chunk.error) throw new Error(`Ollama: ${chunk.error}`);
+    content += chunk.message?.content || '';
+  }
+  try { return normalizeAi(JSON.parse(content)); }
+  catch { throw new Error('Model did not return valid JSON'); }
+}
+
+// Merge AI output into the bin without clobbering what the user typed:
+// name/description are filled only if empty (or still the previous AI text),
+// tags from the previous AI run are replaced, the user's own tags are kept.
+function applyAi(id, r) {
+  const bin = q.getBin.get(id);
+  if (!bin) return;
+  const oldAi = new Set(splitTags(bin.ai_tags).map(t => t.toLowerCase()));
+  const tags = splitTags(bin.tags).filter(t => !oldAi.has(t.toLowerCase()));
+  const have = new Set(tags.map(t => t.toLowerCase()));
+  for (const t of r.tags) {
+    if (have.has(t) || [...tags, t].join(', ').length > 300) continue;
+    tags.push(t); have.add(t);
+  }
+  q.applyAi.run({
+    id,
+    name: bin.name || r.name,
+    description: !bin.description || bin.description === bin.ai_description ? r.description : bin.description,
+    tags: tags.join(', '),
+    ai_description: r.description,
+    ai_tags: r.tags.join(', '),
+    ai_keywords: r.items.map(i => i.name).join(', '),
+    ai_items: JSON.stringify(r.items),
+  });
+}
+
+// One job at a time: vision models are heavy and usually share a single GPU/CPU.
+const aiQueue = [];
+let aiBusy = false;
+function queueAnalysis(id) {
+  if (!OLLAMA_URL) return;
+  q.setAiStatus.run('pending', '', id);
+  if (!aiQueue.includes(id)) aiQueue.push(id);
+  drainAi();
+}
+async function drainAi() {
+  if (aiBusy) return;
+  aiBusy = true;
+  while (aiQueue.length) {
+    const id = aiQueue.shift();
+    try {
+      const photos = q.photos.all(id);
+      if (!q.getBin.get(id)) continue;
+      if (!photos.length) { q.setAiStatus.run('', '', id); continue; }
+      q.setAiStatus.run('running', '', id);
+      const started = Date.now();
+      const result = await analyzePhotos(photos);
+      applyAi(id, result);
+      console.log(`AI: analyzed bin ${id} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    } catch (e) {
+      const msg = e.cause?.code === 'ECONNREFUSED' ? `Can't reach Ollama at ${OLLAMA_URL}` : e.message;
+      console.error(`AI: bin ${id} failed: ${msg}`);
+      if (q.getBin.get(id)) q.setAiStatus.run('error', String(msg).slice(0, 300), id);
+    }
+  }
+  aiBusy = false;
+}
+// Resume anything that was queued when the container stopped
+if (OLLAMA_URL) q.aiQueued.all().forEach(r => queueAnalysis(r.id));
 
 // ---------- app ----------
 const app = express();
@@ -170,7 +317,61 @@ app.get('/b/:code', (req, res) => {
 
 const api = express.Router();
 
-api.get('/config', (req, res) => res.json({ baseUrl: baseUrl(req), prefix: BIN_PREFIX, baseUrlSet: !!BASE_URL }));
+api.get('/config', (req, res) => res.json({
+  baseUrl: baseUrl(req), prefix: BIN_PREFIX, baseUrlSet: !!BASE_URL,
+  ai: { enabled: !!OLLAMA_URL, auto: AI_AUTO, model: OLLAMA_MODEL },
+}));
+
+api.get('/ai/status', async (_req, res) => {
+  if (!OLLAMA_URL) return res.json({ enabled: false });
+  const out = { enabled: true, url: OLLAMA_URL, model: OLLAMA_MODEL, auto: AI_AUTO,
+    queued: aiQueue.length + (aiBusy ? 1 : 0), unanalyzed: q.aiNeverRun.all().length };
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(5000) });
+    const { models = [] } = await r.json();
+    const names = models.map(m => m.name);
+    out.reachable = true;
+    out.modelInstalled = names.includes(OLLAMA_MODEL) || names.includes(`${OLLAMA_MODEL}:latest`);
+  } catch (e) {
+    out.reachable = false;
+    out.error = e.message;
+  }
+  res.json(out);
+});
+
+api.post('/ai/analyze-all', (_req, res) => {
+  if (!OLLAMA_URL) return res.status(400).json({ error: 'AI is not configured (set OLLAMA_URL)' });
+  const ids = q.aiNeverRun.all().map(r => r.id);
+  ids.forEach(queueAnalysis);
+  res.json({ queued: ids.length });
+});
+
+api.post('/bins/:id/analyze', (req, res) => {
+  const id = Number(req.params.id);
+  if (!OLLAMA_URL) return res.status(400).json({ error: 'AI is not configured (set OLLAMA_URL)' });
+  if (!q.getBin.get(id)) return res.status(404).json({ error: 'Not found' });
+  if (!q.photos.all(id).length) return res.status(400).json({ error: 'Add a photo first' });
+  queueAnalysis(id);
+  res.json(fullBin(id));
+});
+
+// Copy the objects the AI spotted into the bin's contents list (skipping ones already listed)
+api.post('/bins/:id/ai-items', (req, res) => {
+  const id = Number(req.params.id);
+  const bin = fullBin(id);
+  if (!bin) return res.status(404).json({ error: 'Not found' });
+  const have = new Set(bin.items.map(i => i.name.toLowerCase()));
+  tx(() => {
+    let sort = q.maxSort.get(id).m;
+    for (const it of bin.ai_items) {
+      if (have.has(it.name.toLowerCase())) continue;
+      q.insertItem.run(id, it.name, it.qty, '', ++sort);
+      have.add(it.name.toLowerCase());
+    }
+    q.touch.run(id);
+  });
+  res.json(fullBin(id));
+});
 
 api.get('/bins', (req, res) => {
   const term = String(req.query.q || '').trim();
@@ -239,6 +440,7 @@ api.post('/bins/:id/photos', upload.array('photos', 20), (req, res) => {
   }
   (req.files || []).forEach(f => q.insertPhoto.run(id, f.filename));
   q.touch.run(id);
+  if (AI_AUTO && req.files?.length) queueAnalysis(id);
   res.json(q.photos.all(id));
 });
 

@@ -14,5 +14,8 @@ services:
       # Optional login (leave blank for none)
       - AUTH_USER=
       - AUTH_PASS=
+      # Optional local AI (Ollama vision model) that describes and tags bins from their photos
+      - OLLAMA_URL=
+      - OLLAMA_MODEL=gemma3:4b
     volumes:
       - /mnt/user/appdata/binventory:/data

@@ -16,6 +16,9 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
+let configP;
+const getConfig = () => (configP ||= api('/config').catch(e => { configP = null; throw e; }));
+
 let toastTimer;
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -71,6 +74,7 @@ const icons = {
   box: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8h18v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M2 4h20v4H2z"/><path d="M10 12h4"/></svg>',
   camera: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
   print: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>',
+  spark: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9zM19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9zM5 15l.7 1.8 1.8.7-1.8.7L5 20l-.7-1.8-1.8-.7 1.8-.7z"/></svg>',
   plus: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>',
 };
 
@@ -155,8 +159,12 @@ async function viewList() {
   await load();
 }
 
+let aiPoll;
 async function viewBin(id) {
-  const b = await api(`/bins/${id}`);
+  clearTimeout(aiPoll);
+  const [b, cfg] = await Promise.all([api(`/bins/${id}`), getConfig()]);
+  const aiTags = new Set((b.ai_tags || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean));
+  const aiBusy = b.ai_status === 'pending' || b.ai_status === 'running';
   const [hero, ...rest] = b.photos;
   const locs = [['RACK', b.rack], ['SHELF', b.shelf], ['POS', b.position]].filter(([, v]) => v);
   const totalQty = b.items.reduce((s, i) => s + i.qty, 0);
@@ -185,8 +193,10 @@ async function viewBin(id) {
         : '<div class="hint">No items listed.</div>'}
       </div>
 
+      ${cfg.ai.enabled && b.photos.length ? aiSection(b, aiBusy) : ''}
+
       ${b.notes ? `<div class="section"><h3>Notes</h3><div class="notes">${esc(b.notes)}</div></div>` : ''}
-      ${b.tags ? `<div class="section"><h3>Tags</h3><div class="tags">${b.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<a class="tag" href="#/" data-tag="${esc(t)}">${esc(t)}</a>`).join('')}</div></div>` : ''}
+      ${b.tags ? `<div class="section"><h3>Tags</h3><div class="tags">${b.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<a class="tag ${aiTags.has(t.toLowerCase()) ? 'ai' : ''}" href="#/" data-tag="${esc(t)}" ${aiTags.has(t.toLowerCase()) ? 'title="Added by AI"' : ''}>${esc(t)}</a>`).join('')}</div></div>` : ''}
 
       <div class="section">
         <h3>Label</h3>
@@ -205,15 +215,51 @@ async function viewBin(id) {
 
   document.getElementById('print').onclick = () => printLabels([b.id]);
   document.querySelectorAll('.gallery img').forEach(img => img.onclick = () => lightbox(img.src));
-  document.querySelectorAll('.tag').forEach(t => t.onclick = () => { state.q = t.dataset.tag; });
+  document.querySelectorAll('a.tag').forEach(t => t.onclick = () => { state.q = t.dataset.tag; });
   document.getElementById('addPhoto').onchange = async e => {
     const files = [...e.target.files];
     if (!files.length) return;
     toast(`Uploading ${files.length} photo${files.length === 1 ? '' : 's'}…`);
     await uploadPhotos(b.id, files);
-    toast('Photos added');
+    toast(cfg.ai.enabled && cfg.ai.auto ? 'Photos added · AI is looking at them…' : 'Photos added');
     viewBin(id);
   };
+
+  const $analyze = document.getElementById('aiRun');
+  if ($analyze) $analyze.onclick = async () => {
+    $analyze.disabled = true;
+    try { await api(`/bins/${b.id}/analyze`, { method: 'POST' }); viewBin(id); }
+    catch (err) { toast('Error: ' + err.message); $analyze.disabled = false; }
+  };
+  const $addAi = document.getElementById('aiAdd');
+  if ($addAi) $addAi.onclick = async () => {
+    $addAi.disabled = true;
+    await api(`/bins/${b.id}/ai-items`, { method: 'POST' });
+    toast('Added to contents');
+    viewBin(id);
+  };
+
+  // Refresh when the background analysis finishes (only while still on this bin)
+  if (aiBusy) aiPoll = setTimeout(() => { if (location.hash === `#/bin/${id}`) viewBin(id); }, 3000);
+}
+
+function aiSection(b, busy) {
+  const have = new Set(b.items.map(i => i.name.toLowerCase()));
+  const missing = b.ai_items.filter(i => !have.has(i.name.toLowerCase()));
+  let body;
+  if (busy) body = `<div class="ai-busy">${icons.spark} ${b.ai_status === 'running' ? 'Looking at the photos…' : 'Waiting for the AI…'}</div>`;
+  else if (b.ai_status === 'error') body = `<div class="hint" style="margin:0">AI couldn't analyze this bin: ${esc(b.ai_error)}</div>`;
+  else if (b.ai_items.length) body = `
+    <div class="tags">${b.ai_items.map(i => `<span class="tag ai">${i.qty > 1 ? `${i.qty}× ` : ''}${esc(i.name)}</span>`).join('')}</div>
+    ${missing.length ? `<button class="btn" id="aiAdd" style="margin-top:10px;min-height:36px">${icons.plus} Add ${missing.length} to contents</button>` : ''}`;
+  else body = '<div class="hint" style="margin:0">Not analyzed yet.</div>';
+  return `
+    <div class="section">
+      <h3>Spotted by AI
+        ${busy ? '' : `<button class="btn" id="aiRun" style="min-height:36px;padding:6px 12px">${icons.spark} ${b.ai_status ? 'Re-analyze' : 'Analyze'}</button>`}
+      </h3>
+      ${body}
+    </div>`;
 }
 
 function photoTile(p) {
@@ -222,10 +268,12 @@ function photoTile(p) {
 
 async function viewEdit(id) {
   const isNew = !id;
-  const [b, locs] = await Promise.all([
+  const [b, locs, cfg] = await Promise.all([
     isNew ? { name: '', description: '', rack: '', shelf: '', position: '', notes: '', tags: '', items: [], photos: [] } : api(`/bins/${id}`),
     api('/locations'),
+    getConfig(),
   ]);
+  const aiAuto = cfg.ai.enabled && cfg.ai.auto;
   let items = b.items.map(i => ({ name: i.name, qty: i.qty, notes: i.notes }));
   let pending = [];
 
@@ -242,8 +290,8 @@ async function viewEdit(id) {
         <datalist id="racks">${locs.racks.map(r => `<option value="${esc(r)}">`).join('')}</datalist>
         <datalist id="shelves">${locs.shelves.map(r => `<option value="${esc(r)}">`).join('')}</datalist>
       </div>
-      <div class="field"><label>Name</label><input type="text" name="name" placeholder="e.g. Christmas lights" value="${esc(b.name)}" required></div>
-      <div class="field"><label>General description (printed on label)</label><textarea name="description" rows="2" placeholder="e.g. Outdoor string lights, extension cords, timers">${esc(b.description)}</textarea></div>
+      <div class="field"><label>Name</label><input type="text" name="name" placeholder="${aiAuto ? 'Leave blank to let AI name it from the photos' : 'e.g. Christmas lights'}" value="${esc(b.name)}" ${aiAuto ? '' : 'required'}></div>
+      <div class="field"><label>General description (printed on label)</label><textarea name="description" rows="2" placeholder="${aiAuto ? 'Leave blank to let AI describe it from the photos' : 'e.g. Outdoor string lights, extension cords, timers'}">${esc(b.description)}</textarea></div>
 
       <div class="field">
         <label>Contents</label>
@@ -364,6 +412,10 @@ async function viewSettings() {
       <h3>Printing</h3>
       <div class="hint" style="margin:0">Labels are 4×6 in PDFs, one bin per page. Print at <b>100% / actual size</b> (not “fit to page”) on your thermal label printer. From a phone, open the PDF and use Share → Print.</div>
     </div>
+    <div class="section" id="aiSettings">
+      <h3>Local AI</h3>
+      ${cfg.ai.enabled ? '<div class="hint" style="margin:0">Checking…</div>' : `<div class="hint" style="margin:0">Off. Run <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a> (there's an Unraid app for it), pull a vision model such as <code>gemma3:4b</code>, then set the container's <code>OLLAMA_URL</code> variable (e.g. <code>http://192.168.1.10:11434</code>). New photos will then be described and tagged automatically.</div>`}
+    </div>
     <div class="section">
       <h3>Backup</h3>
       <div class="hint" style="margin:0 0 10px">Your data lives in the container's <code>/data</code> folder (database + photos). You can also download everything as JSON.</div>
@@ -373,6 +425,29 @@ async function viewSettings() {
       <h3>Add to home screen</h3>
       <div class="hint" style="margin:0">On iPhone: Share → Add to Home Screen. On Android: ⋮ → Add to Home screen. It'll open like an app.</div>
     </div>`;
+  if (cfg.ai.enabled) renderAiSettings();
+}
+
+async function renderAiSettings() {
+  const $s = document.getElementById('aiSettings');
+  if (!$s) return;
+  const st = await api('/ai/status');
+  let status;
+  if (!st.reachable) status = `<div class="warn" style="margin:0"><b>Can't reach Ollama</b> at <code>${esc(st.url)}</code>. ${esc(st.error || '')}</div>`;
+  else if (!st.modelInstalled) status = `<div class="warn" style="margin:0">Connected, but model <code>${esc(st.model)}</code> isn't installed. In the Ollama container run <code>ollama pull ${esc(st.model)}</code>.</div>`;
+  else status = `<div class="hint" style="margin:0">Connected to <code>${esc(st.url)}</code> using <code>${esc(st.model)}</code>. ${st.auto ? 'New photos are analyzed automatically.' : 'Automatic analysis is off (AI_AUTO) — use Analyze on a bin.'}</div>`;
+  $s.innerHTML = `
+    <h3>Local AI</h3>
+    ${status}
+    ${st.queued ? `<div class="hint" style="margin:10px 0 0">${st.queued} bin${st.queued === 1 ? '' : 's'} in the queue…</div>` : ''}
+    ${st.unanalyzed ? `<button class="btn" id="aiAll" style="margin-top:10px">${icons.spark} Analyze ${st.unanalyzed} bin${st.unanalyzed === 1 ? '' : 's'} with photos</button>` : ''}`;
+  const $all = document.getElementById('aiAll');
+  if ($all) $all.onclick = async () => {
+    $all.disabled = true;
+    const { queued } = await api('/ai/analyze-all', { method: 'POST' });
+    toast(`Queued ${queued} bin${queued === 1 ? '' : 's'}`);
+    renderAiSettings();
+  };
 }
 
 // ---------- router ----------

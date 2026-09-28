@@ -189,3 +189,9 @@ main { max-width: 760px; margin: 0 auto; padding: 16px; }
 .spinner { text-align: center; padding: 40px; color: var(--muted); }
 .warn { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; font-size: 14px; margin-bottom: 14px; }
 code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+
+/* local AI */
+.tag.ai { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.ai-busy { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.ai-busy svg { color: var(--accent); animation: ai-pulse 1.2s ease-in-out infinite; }
+@keyframes ai-pulse { 50% { opacity: .35; transform: scale(.85); } }

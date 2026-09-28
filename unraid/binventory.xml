@@ -9,7 +9,7 @@
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Overview>Storage bin inventory. Track what's in each bin (items, photos, rack/shelf location) from your phone and print 4x6 labels with QR codes that open the bin's contents.</Overview>
+  <Overview>Storage bin inventory. Track what's in each bin (items, photos, rack/shelf location) from your phone and print 4x6 labels with QR codes that open the bin's contents. Optional local AI (Ollama) describes and tags bins from their photos.</Overview>
   <Category>Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <Icon>https://raw.githubusercontent.com/RICKxxROLLING/binventory/main/public/icon.png</Icon>
@@ -19,5 +19,8 @@
   <Config Name="BIN_PREFIX" Target="BIN_PREFIX" Default="BIN" Mode="" Description="Prefix for bin codes (BIN-0001)" Type="Variable" Display="always" Required="false" Mask="false">BIN</Config>
   <Config Name="AUTH_USER" Target="AUTH_USER" Default="" Mode="" Description="Optional login username" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="AUTH_PASS" Target="AUTH_PASS" Default="" Mode="" Description="Optional login password" Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="OLLAMA_URL" Target="OLLAMA_URL" Default="" Mode="" Description="Optional local AI: Ollama address, e.g. http://192.168.1.10:11434. Photos are analyzed to fill in the description and search tags. Blank = off." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="OLLAMA_MODEL" Target="OLLAMA_MODEL" Default="gemma3:4b" Mode="" Description="Ollama vision model (run: ollama pull gemma3:4b)" Type="Variable" Display="always" Required="false" Mask="false">gemma3:4b</Config>
+  <Config Name="AI_AUTO" Target="AI_AUTO" Default="true" Mode="" Description="Analyze photos automatically on upload (true/false)" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
   <Config Name="TZ" Target="TZ" Default="America/Los_Angeles" Mode="" Description="Timezone" Type="Variable" Display="advanced" Required="false" Mask="false">America/Los_Angeles</Config>
 </Container>
