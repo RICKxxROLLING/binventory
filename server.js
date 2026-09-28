@@ -22,6 +22,8 @@ const OLLAMA_URL = (process.env.OLLAMA_URL || '').replace(/\/+$/, '');
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b';
 const AI_AUTO = !/^(0|false|no|off)$/i.test(process.env.AI_AUTO || '');
 const AI_MAX_PHOTOS = Math.max(1, parseInt(process.env.AI_MAX_PHOTOS || '4', 10) || 4);
+// Ollama's default context is small; several photos (Qwen-VL uses ~1k tokens each) would get cut off.
+const AI_NUM_CTX = Math.max(2048, parseInt(process.env.AI_NUM_CTX || '8192', 10) || 8192);
 
 fs.mkdirSync(PHOTO_DIR, { recursive: true });
 
@@ -205,7 +207,7 @@ async function analyzePhotos(photos) {
       model: OLLAMA_MODEL,
       stream: true,
       format: AI_SCHEMA,
-      options: { temperature: 0.1 },
+      options: { temperature: 0.1, num_ctx: AI_NUM_CTX },
       messages: [{ role: 'user', content: AI_PROMPT, images }],
     }),
   });

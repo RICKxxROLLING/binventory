@@ -55,6 +55,7 @@ template's Repository to `binventory:latest`.
 | `OLLAMA_MODEL` | `gemma3:4b` | Vision model used to look at photos |
 | `AI_AUTO`    | `true`  | Analyze photos automatically when they're uploaded |
 | `AI_MAX_PHOTOS` | `4`  | Newest N photos of a bin sent to the model |
+| `AI_NUM_CTX` | `8192`  | Model context size (room for several photos). Lower it if the model doesn't fit in VRAM. |
 
 ## Local AI (auto description + tags)
 
@@ -75,6 +76,10 @@ Use **Re-analyze** on a bin to run it again, or **Settings → Local AI → Anal
 2. Pull a vision model from the Ollama container's console: `ollama pull gemma3:4b`
 3. In Binventory, set `OLLAMA_URL` to `http://<unraid-ip>:11434` and apply.
 4. **Settings → Local AI** should say *Connected*.
+
+**Nvidia GPU:** install the **Nvidia Driver** plugin, then in the Ollama container template add `--runtime=nvidia` to
+*Extra Parameters* and set `NVIDIA_VISIBLE_DEVICES` to your GPU's UUID (shown on the Nvidia Driver plugin page, or use `all`).
+An 8 GB card (e.g. RTX 2070/2080) runs `qwen2.5vl:7b` fully on the GPU: set `OLLAMA_MODEL=qwen2.5vl:7b`.
 
 Model choices: `gemma3:4b` (default, ~3.5 GB, OK on CPU), `qwen2.5vl:7b` (better at reading labels and small parts, ~6 GB, best with a GPU),
 `llava-phi3` (small). Any Ollama model that accepts images will work; set `OLLAMA_MODEL` to its name.
