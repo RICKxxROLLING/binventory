@@ -1,0 +1,17 @@
+{
+  "name": "binventory",
+  "version": "1.0.0",
+  "description": "Self-hosted storage bin inventory with 4x6 QR labels",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning server.js"
+  },
+  "engines": { "node": ">=22.13" },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "pdfkit": "^0.15.2",
+    "qrcode": "^1.5.4"
+  }
+}
