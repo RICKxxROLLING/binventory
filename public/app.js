@@ -161,7 +161,7 @@ async function viewList() {
 }
 
 let aiPoll;
-async function viewBin(id, { scanned = false } = {}) {
+async function viewBin(id, { scanned = false, labelHash = '' } = {}) {
   clearTimeout(aiPoll);
   const [b, cfg] = await Promise.all([api(`/bins/${id}`), getConfig()]);
   const aiTags = new Set((b.ai_tags || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean));
@@ -248,7 +248,7 @@ async function viewBin(id, { scanned = false } = {}) {
   };
 
   // Refresh when the background analysis finishes (only while still on this bin)
-  if (scanned && b.label.state !== 'current') scanPrompt(b);
+  if (scanned) handleScan(b, labelHash);
 
   if (aiBusy) aiPoll = setTimeout(() => { if (location.hash === `#/bin/${id}`) viewBin(id); }, 3000);
 }
@@ -503,11 +503,11 @@ async function route() {
     if (h === '/print') return await viewPrint();
     if (h === '/layout') return await viewLayout();
     if ((m = h.match(/^\/bin\/(\d+)\/edit$/))) return await viewEdit(Number(m[1]));
-    if ((m = h.match(/^\/bin\/(\d+)(\?scan)?$/))) {
+    if ((m = h.match(/^\/bin\/(\d+)(\?scan(?:=([0-9a-f]{8}))?)?$/))) {
       state.selecting = false;
       // Drop the scan marker so a refresh or back-navigation doesn't prompt again
       if (m[2]) history.replaceState(null, '', `#/bin/${m[1]}`);
-      return await viewBin(Number(m[1]), { scanned: !!m[2] });
+      return await viewBin(Number(m[1]), { scanned: !!m[2], labelHash: m[3] || '' });
     }
     location.hash = '#/';
   } catch (err) {

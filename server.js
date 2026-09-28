@@ -61,6 +61,13 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_items_bin ON items(bin_id);
   CREATE INDEX IF NOT EXISTS idx_photos_bin ON photos(bin_id);
+  CREATE TABLE IF NOT EXISTS label_prints (
+    bin_id     INTEGER NOT NULL REFERENCES bins(id) ON DELETE CASCADE,
+    hash       TEXT NOT NULL,
+    fields     TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (bin_id, hash)
+  );
   CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -104,6 +111,9 @@ const q = {
   renameSize: db.prepare(`UPDATE bins SET size = ? WHERE size = ?`),
   allItems: db.prepare('SELECT bin_id, name FROM items ORDER BY bin_id, sort, id'),
   markPrinted: db.prepare(`UPDATE bins SET label_snapshot = ?, label_printed_at = datetime('now') WHERE id = ?`),
+  recordLabel: db.prepare(`INSERT INTO label_prints (bin_id, hash, fields) VALUES (?, ?, ?)
+    ON CONFLICT(bin_id, hash) DO UPDATE SET created_at = datetime('now')`),
+  getLabelPrint: db.prepare('SELECT fields, created_at FROM label_prints WHERE bin_id = ? AND hash = ?'),
   getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
   setSetting: db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
   touch: db.prepare(`UPDATE bins SET updated_at=datetime('now') WHERE id = ?`),
@@ -158,6 +168,10 @@ function labelStatus(b) {
   if ((old.description || '') !== now.description) changes.push({ field: 'description', from: old.description || '' });
   return { state: changes.length ? 'changed' : 'current', changes, printedAt: b.label_printed_at };
 }
+
+// Fingerprint of a label's printed content, put in its QR code (?l=...). Scanning compares it with the
+// bin now, so an old sticker is recognised even if nobody confirmed that a newer one was printed.
+const labelHash = b => crypto.createHash('sha256').update(JSON.stringify(labelFields(b))).digest('hex').slice(0, 8);
 
 // Attach label status and drop the raw snapshot from API responses
 function withLabel(b) {
@@ -364,7 +378,9 @@ function binUrl(req, bin) {
 app.get('/b/:code', (req, res) => {
   const bin = q.getBinByCode.get(req.params.code);
   if (!bin) return res.redirect('/#/');
-  res.redirect(`/#/bin/${bin.id}?scan`); // the bin page checks whether the scanned label is out of date
+  // The bin page checks whether the scanned label is out of date
+  const l = String(req.query.l || '').toLowerCase();
+  res.redirect(`/#/bin/${bin.id}?scan${/^[0-9a-f]{8}$/.test(l) ? `=${l}` : ''}`);
 });
 
 const api = express.Router();
@@ -440,6 +456,25 @@ api.get('/print-queue', (_req, res) => {
   });
   const count = s => bins.filter(b => b.label.state === s).length;
   res.json({ bins, counts: { new: count('new'), changed: count('changed'), current: count('current') } });
+});
+
+// A QR label was scanned. l = the fingerprint printed in it (absent on labels printed before fingerprints).
+api.post('/bins/:id/scan', (req, res) => {
+  const id = Number(req.params.id);
+  const bin = q.getBin.get(id);
+  if (!bin) return res.status(404).json({ error: 'Not found' });
+  const l = String(req.body.l || '').toLowerCase();
+  if (!/^[0-9a-f]{8}$/.test(l)) return res.json({ result: 'legacy' });
+  if (l === labelHash(bin)) {
+    // The label in someone's hand matches the bin: that's proof it was printed and stuck on
+    const verified = labelStatus(bin).state !== 'current';
+    if (verified) q.markPrinted.run(JSON.stringify(labelFields(bin)), id);
+    return res.json({ result: 'current', verified });
+  }
+  const row = q.getLabelPrint.get(id, l);
+  let printed = null;
+  try { printed = row ? JSON.parse(row.fields) : null; } catch { /* unknown */ }
+  res.json({ result: 'old', printed, printedAt: row?.created_at || null });
 });
 
 // Confirm labels came out of the printer: remember what's on them now
@@ -742,7 +777,12 @@ app.get('/labels.pdf', (req, res) => {
   res.type('application/pdf');
   res.set('Content-Disposition', `inline; filename="labels-${bins.map(b => b.code).join('_').slice(0, 80)}.pdf"`);
   doc.pipe(res);
-  bins.forEach(bin => { doc.addPage(); drawLabel(doc, bin, binUrl(req, bin)); });
+  bins.forEach(bin => {
+    const hash = labelHash(bin);
+    q.recordLabel.run(bin.id, hash, JSON.stringify(labelFields(bin)));
+    doc.addPage();
+    drawLabel(doc, bin, `${binUrl(req, bin)}?l=${hash}`);
+  });
   doc.end();
 });
 

@@ -125,7 +125,7 @@ main { max-width: 760px; margin: 0 auto; padding: 16px; }
   background: var(--band); color: var(--band-ink); border-radius: var(--radius);
   display: flex; padding: 14px 6px; margin-bottom: 14px;
 }
-.band > div { flex: 1; padding: 0 12px; min-width: 0; }
+.band > div { flex: 1 1 auto; padding: 0 12px; min-width: 0; }
 .band > div + div { border-left: 1px solid rgba(255,255,255,.3); }
 .band small { display: block; font-size: 11px; letter-spacing: .12em; opacity: .75; font-weight: 700; }
 .band strong { display: block; font-size: 30px; line-height: 1.1; overflow-wrap: anywhere; }

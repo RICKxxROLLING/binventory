@@ -112,8 +112,39 @@ async function viewPrint() {
   render();
 }
 
-// Someone scanned this bin's QR code. The code never changes, so we can't tell which physical label
-// it was, but if the last confirmed print no longer matches the bin, the label they're holding is stale.
+// Someone scanned this bin's QR code. Labels carry a fingerprint of what's printed on them, so the
+// server can tell exactly whether this sticker is current. Older labels without one fall back to the tracker.
+async function handleScan(b, labelHash) {
+  let r = { result: 'legacy' };
+  try { r = await api(`/bins/${b.id}/scan`, { method: 'POST', body: { l: labelHash } }); } catch { /* fall back */ }
+  if (r.result === 'current') {
+    if (r.verified) { toast('Label checked: it matches this bin'); refreshPrintBadge(); }
+    return;
+  }
+  if (r.result === 'old') return oldLabelPrompt(b, r);
+  if (b.label.state !== 'current') scanPrompt(b);
+}
+
+function labelSummary(f) {
+  return `<div class="scan-check"><span class="loc">${esc(locText(f))}</span><b>${esc(f.name || 'Untitled bin')}</b>${f.description ? `<span class="hint" style="margin:0">${esc(f.description)}</span>` : ''}</div>`;
+}
+
+// The scanned sticker is definitely out of date (its fingerprint doesn't match the bin now)
+function oldLabelPrompt(b, r) {
+  const moved = r.printed && ['rack', 'shelf', 'position'].some(k => (r.printed[k] || '') !== (b[k] || ''));
+  const sh = sheet('You scanned an old label', `
+    ${r.printed ? `<p style="margin-top:0">This label was printed ${r.printedAt ? new Date(r.printedAt + 'Z').toLocaleDateString() : 'earlier'} and says:</p>
+      ${labelSummary(r.printed)}<p style="margin:0 0 6px">The bin is now:</p>` : '<p style="margin-top:0">The bin has changed since this label was printed. It is now:</p>'}
+    ${labelSummary(b)}
+    ${moved ? `<div class="warn" style="margin:0 0 12px">This bin belongs at <b>${esc(locText(b))}</b>.</div>` : ''}
+    <div class="btn-row" style="flex-direction:column">
+      <button class="btn primary" id="scanPrint">${icons.print} Print new label</button>
+      <button class="btn" data-close>Not now</button>
+    </div>`);
+  sh.body.querySelector('#scanPrint').onclick = () => { sh.close(); printLabels([b.id]); };
+}
+
+// Label printed before fingerprints existed: judge it by the print tracker
 function scanPrompt(b) {
   const done = async msg => {
     await api('/labels/printed', { method: 'POST', body: { ids: [b.id] } });
@@ -138,7 +169,7 @@ function scanPrompt(b) {
     // Printed before the tracker existed (or never confirmed): let them vouch for it
     sh = sheet('Is this label current?', `
       <p style="margin-top:0">Binventory has no record of this label being printed. Check that it shows:</p>
-      <div class="scan-check"><span class="loc">${esc(locText(b))}</span><b>${esc(b.name || 'Untitled bin')}</b>${b.description ? `<span class="hint" style="margin:0">${esc(b.description)}</span>` : ''}</div>
+      ${labelSummary(b)}
       <div class="btn-row" style="flex-direction:column">
         <button class="btn primary" id="scanDone">Yes, it matches</button>
         <button class="btn" id="scanPrint">${icons.print} No, print a new one</button>
