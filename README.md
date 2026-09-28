@@ -15,11 +15,13 @@ Data (SQLite database + photos) lives in `/data`.
 Every push to `main` builds the image with GitHub Actions and publishes it to
 `ghcr.io/rickxxrolling/binventory:latest`, so Unraid pulls it like any other container.
 
-1. In Unraid go to **Docker → Template Repositories** (bottom of the Docker tab), add
-   `https://github.com/RICKxxROLLING/binventory` and click **Save**.
-   *(Alternative: in the Unraid terminal run
-   `wget -O /boot/config/plugins/dockerMan/templates-user/my-binventory.xml https://raw.githubusercontent.com/RICKxxROLLING/binventory/main/unraid/binventory.xml`)*
-2. **Docker → Add Container** and choose **binventory** from the Template dropdown.
+1. Open the Unraid terminal (**>_** icon, top right) and download the template:
+   ```bash
+   wget -O /boot/config/plugins/dockerMan/templates-user/my-binventory.xml https://raw.githubusercontent.com/RICKxxROLLING/binventory/main/unraid/binventory.xml
+   ```
+2. **Docker → Add Container** and choose **binventory** from the Template dropdown (under *User templates*).
+   No terminal? Add the container manually instead: Repository `ghcr.io/rickxxrolling/binventory:latest`,
+   a Path `/data` → `/mnt/user/appdata/binventory`, a Port `8080` → `8080`, and a Variable `BASE_URL`.
 3. Set **BASE_URL** to the address your phone uses to reach it, e.g. `http://192.168.1.10:8080`
    (your Unraid IP + port). This URL is printed into every QR code, so choose something stable.
    Check the **Data** path (default `/mnt/user/appdata/binventory`) and hit **Apply**.
