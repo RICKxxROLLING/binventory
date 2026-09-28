@@ -122,6 +122,9 @@ Moving a bin changes the location printed on its label, so after moving you get 
   Untick any you want to skip, then **Print**.
 - After every print you're asked whether the labels came out. Say yes and the tracker records what's on them. Until then they still count as waiting.
   Moving a bin back to the spot on its label makes it up to date again.
+- **Scanning an old label** asks for a new one: if the bin has moved, been renamed or re-described since its label was printed,
+  scanning the QR code shows what changed (and where the bin belongs now) with a **Print new label** button.
+  Scanning a label the tracker has no record of asks you to confirm it matches, which is a handy way to check existing labels one bin at a time.
 - Upgrading with labels already on your bins? Open the print tracker once and tap **Mark all as already printed** so only future changes show up.
 - You get a 4×6 in PDF. Print at **100% / Actual size** (not "fit to page").
 - Works with common 4×6 thermal printers (Rollo, Zebra, MUNBYN, Phomemo, etc.). The QR code is vector-drawn so it stays sharp at 203 dpi.

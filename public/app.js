@@ -161,7 +161,7 @@ async function viewList() {
 }
 
 let aiPoll;
-async function viewBin(id) {
+async function viewBin(id, { scanned = false } = {}) {
   clearTimeout(aiPoll);
   const [b, cfg] = await Promise.all([api(`/bins/${id}`), getConfig()]);
   const aiTags = new Set((b.ai_tags || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean));
@@ -248,6 +248,8 @@ async function viewBin(id) {
   };
 
   // Refresh when the background analysis finishes (only while still on this bin)
+  if (scanned && b.label.state !== 'current') scanPrompt(b);
+
   if (aiBusy) aiPoll = setTimeout(() => { if (location.hash === `#/bin/${id}`) viewBin(id); }, 3000);
 }
 
@@ -501,7 +503,12 @@ async function route() {
     if (h === '/print') return await viewPrint();
     if (h === '/layout') return await viewLayout();
     if ((m = h.match(/^\/bin\/(\d+)\/edit$/))) return await viewEdit(Number(m[1]));
-    if ((m = h.match(/^\/bin\/(\d+)$/))) { state.selecting = false; return await viewBin(Number(m[1])); }
+    if ((m = h.match(/^\/bin\/(\d+)(\?scan)?$/))) {
+      state.selecting = false;
+      // Drop the scan marker so a refresh or back-navigation doesn't prompt again
+      if (m[2]) history.replaceState(null, '', `#/bin/${m[1]}`);
+      return await viewBin(Number(m[1]), { scanned: !!m[2] });
+    }
     location.hash = '#/';
   } catch (err) {
     $app.innerHTML = `<div class="empty"><h2>Couldn't load that</h2>${esc(err.message)}<p><a class="btn" href="#/">Back to bins</a></p></div>`;

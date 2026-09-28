@@ -290,3 +290,7 @@ label.chip input { position: absolute; opacity: 0; pointer-events: none; }
 .card.plabel { cursor: pointer; align-items: center; }
 .card.plabel input { width: 22px; height: 22px; flex: none; accent-color: var(--accent); margin: 0 2px; }
 .card.plabel .plink { flex: none; font-size: 26px; color: var(--muted); text-decoration: none; padding: 0 6px; }
+.scan-why { margin: 0 0 12px; padding-left: 20px; }
+.scan-why li { margin: 2px 0; }
+.scan-check { display: grid; gap: 4px; justify-items: start; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 14px; }
+.btn-row[style*="column"] > .btn { width: 100%; flex: none; }

@@ -364,7 +364,7 @@ function binUrl(req, bin) {
 app.get('/b/:code', (req, res) => {
   const bin = q.getBinByCode.get(req.params.code);
   if (!bin) return res.redirect('/#/');
-  res.redirect(`/#/bin/${bin.id}`);
+  res.redirect(`/#/bin/${bin.id}?scan`); // the bin page checks whether the scanned label is out of date
 });
 
 const api = express.Router();

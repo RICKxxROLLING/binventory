@@ -111,3 +111,40 @@ async function viewPrint() {
   };
   render();
 }
+
+// Someone scanned this bin's QR code. The code never changes, so we can't tell which physical label
+// it was, but if the last confirmed print no longer matches the bin, the label they're holding is stale.
+function scanPrompt(b) {
+  const done = async msg => {
+    await api('/labels/printed', { method: 'POST', body: { ids: [b.id] } });
+    sh.close();
+    toast(msg);
+    route();
+  };
+  let sh;
+  if (b.label.state === 'changed') {
+    const moved = b.label.changes.find(c => c.field === 'location');
+    sh = sheet('This label is out of date', `
+      <p style="margin-top:0">The label on this bin no longer matches it:</p>
+      <ul class="scan-why">${labelReasons(b.label).map(r => `<li>${esc(r)}</li>`).join('')}</ul>
+      ${moved ? `<div class="warn" style="margin:0 0 12px">This bin now belongs at <b>${esc(locText(b))}</b>${moved.from ? `, not ${esc(moved.from)}` : ''}.</div>` : ''}
+      <div class="btn-row" style="flex-direction:column">
+        <button class="btn primary" id="scanPrint">${icons.print} Print new label</button>
+        <button class="btn" id="scanDone">I've already put the new label on</button>
+        <button class="btn" data-close>Not now</button>
+      </div>`);
+    sh.body.querySelector('#scanDone').onclick = () => done('Label marked as up to date');
+  } else {
+    // Printed before the tracker existed (or never confirmed): let them vouch for it
+    sh = sheet('Is this label current?', `
+      <p style="margin-top:0">Binventory has no record of this label being printed. Check that it shows:</p>
+      <div class="scan-check"><span class="loc">${esc(locText(b))}</span><b>${esc(b.name || 'Untitled bin')}</b>${b.description ? `<span class="hint" style="margin:0">${esc(b.description)}</span>` : ''}</div>
+      <div class="btn-row" style="flex-direction:column">
+        <button class="btn primary" id="scanDone">Yes, it matches</button>
+        <button class="btn" id="scanPrint">${icons.print} No, print a new one</button>
+        <button class="btn" data-close>Not now</button>
+      </div>`);
+    sh.body.querySelector('#scanDone').onclick = () => done('Label marked as current');
+  }
+  sh.body.querySelector('#scanPrint').onclick = () => { sh.close(); printLabels([b.id]); };
+}
