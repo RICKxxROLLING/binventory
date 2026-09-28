@@ -9,6 +9,7 @@ const QRCode = require('qrcode');
 const PDFDocument = require('pdfkit');
 const { DatabaseSync } = require('node:sqlite');
 const { setupAuth } = require('./auth');
+const Layout = require('./layout');
 
 // ---------- config ----------
 const PORT = parseInt(process.env.PORT || '8080', 10);
@@ -60,11 +61,15 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_items_bin ON items(bin_id);
   CREATE INDEX IF NOT EXISTS idx_photos_bin ON photos(bin_id);
+  CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `);
 
 // Columns added after the first release
 const binCols = new Set(db.prepare('PRAGMA table_info(bins)').all().map(c => c.name));
-for (const col of ['ai_description', 'ai_tags', 'ai_keywords', 'ai_items', 'ai_status', 'ai_error']) {
+for (const col of ['ai_description', 'ai_tags', 'ai_keywords', 'ai_items', 'ai_status', 'ai_error', 'size']) {
   if (!binCols.has(col)) db.exec(`ALTER TABLE bins ADD COLUMN ${col} TEXT NOT NULL DEFAULT ''`);
 }
 
@@ -89,11 +94,17 @@ const q = {
   getBinByCode: db.prepare('SELECT * FROM bins WHERE code = ? COLLATE NOCASE'),
   items: db.prepare('SELECT * FROM items WHERE bin_id = ? ORDER BY sort, id'),
   photos: db.prepare('SELECT * FROM photos WHERE bin_id = ? ORDER BY id'),
-  insertBin: db.prepare(`INSERT INTO bins (name, description, rack, shelf, position, notes, tags)
-    VALUES (:name, :description, :rack, :shelf, :position, :notes, :tags)`),
+  insertBin: db.prepare(`INSERT INTO bins (name, description, rack, shelf, position, notes, tags, size)
+    VALUES (:name, :description, :rack, :shelf, :position, :notes, :tags, :size)`),
   setCode: db.prepare('UPDATE bins SET code = ? WHERE id = ?'),
   updateBin: db.prepare(`UPDATE bins SET name=:name, description=:description, rack=:rack, shelf=:shelf,
-    position=:position, notes=:notes, tags=:tags, updated_at=datetime('now') WHERE id=:id`),
+    position=:position, notes=:notes, tags=:tags, size=:size, updated_at=datetime('now') WHERE id=:id`),
+  setLocation: db.prepare(`UPDATE bins SET rack=:rack, shelf=:shelf, position=:position, updated_at=datetime('now') WHERE id=:id`),
+  renameRack: db.prepare(`UPDATE bins SET rack = ? WHERE rack = ? COLLATE NOCASE`),
+  renameSize: db.prepare(`UPDATE bins SET size = ? WHERE size = ?`),
+  allItems: db.prepare('SELECT bin_id, name FROM items ORDER BY bin_id, sort, id'),
+  getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
+  setSetting: db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
   touch: db.prepare(`UPDATE bins SET updated_at=datetime('now') WHERE id = ?`),
   deleteBin: db.prepare('DELETE FROM bins WHERE id = ?'),
   clearItems: db.prepare('DELETE FROM items WHERE bin_id = ?'),
@@ -138,6 +149,7 @@ function cleanBin(body) {
     position: s(body.position, 40),
     notes: s(body.notes, 5000),
     tags: s(body.tags, 300),
+    size: s(body.size, 40),
   };
 }
 
@@ -335,6 +347,7 @@ api.get('/config', (req, res) => res.json({
   baseUrl: baseUrl(req), prefix: BIN_PREFIX, baseUrlSet: !!BASE_URL,
   ai: { enabled: !!OLLAMA_URL, auto: AI_AUTO, model: OLLAMA_MODEL },
   auth: { enabled: auth.enabled, user: auth.user, days: auth.days },
+  hasLayout: getLayout().racks.length > 0,
 }));
 
 api.get('/ai/status', async (_req, res) => {
@@ -395,7 +408,123 @@ api.get('/bins', (req, res) => {
 });
 
 api.get('/locations', (_req, res) => {
-  res.json({ racks: q.racks.all().map(r => r.rack), shelves: q.shelves.all().map(r => r.shelf) });
+  const layout = getLayout();
+  const racks = [...new Set([...layout.racks.map(r => r.name), ...q.racks.all().map(r => r.rack)])];
+  res.json({ racks, shelves: q.shelves.all().map(r => r.shelf), sizes: layout.sizes, hasLayout: layout.racks.length > 0 });
+});
+
+// ---------- rack layout + bin sizes ----------
+function getLayout() {
+  const row = q.getSetting.get('layout');
+  try { return Layout.normalizeLayout(row ? JSON.parse(row.value) : {}); } catch { return Layout.normalizeLayout({}); }
+}
+
+// All bins with what the similarity scoring needs
+function layoutBins() {
+  const items = new Map();
+  for (const r of q.allItems.all()) {
+    if (!items.has(r.bin_id)) items.set(r.bin_id, []);
+    items.get(r.bin_id).push({ name: r.name });
+  }
+  return q.listBins.all().map(b => ({
+    id: b.id, code: b.code, name: b.name, description: b.description, tags: b.tags, ai_keywords: b.ai_keywords,
+    rack: b.rack, shelf: b.shelf, position: b.position, size: b.size, cover: b.cover, items: items.get(b.id) || [],
+  }));
+}
+
+api.get('/layout', (_req, res) => {
+  const layout = getLayout();
+  const bins = layoutBins();
+  const occ = Layout.occupancy(layout, bins);
+  res.json({
+    layout,
+    bins: bins.map(({ items, description, ai_keywords, ...b }) => b),
+    unplaced: [...occ.unplaced, ...occ.conflicts],
+    themes: Layout.shelfThemes(layout, bins),
+  });
+});
+
+api.put('/layout', (req, res) => {
+  const old = getLayout();
+  const layout = Layout.normalizeLayout(req.body);
+  tx(() => {
+    // Renaming a rack or a size preset carries the bins along with it
+    for (const r of layout.racks) {
+      const prev = old.racks.find(o => o.id === r.id);
+      if (prev && prev.name !== r.name) q.renameRack.run(r.name, prev.name);
+    }
+    for (const [from, to] of Object.entries(req.body.renamedSizes || {})) {
+      if (layout.sizes.some(s => s.name === to)) q.renameSize.run(String(to), String(from));
+    }
+    q.setSetting.run('layout', JSON.stringify(layout));
+  });
+  res.json(layout);
+});
+
+// Add one size preset (from the bin form) without round-tripping the whole layout
+api.post('/sizes', (req, res) => {
+  const layout = getLayout();
+  const name = String(req.body.name || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  if (!name) return res.status(400).json({ error: 'Name the size' });
+  if (!layout.sizes.some(s => s.name.toLowerCase() === name.toLowerCase())) {
+    layout.sizes.push({ name, dims: String(req.body.dims || '').trim().slice(0, 60) });
+    q.setSetting.run('layout', JSON.stringify(Layout.normalizeLayout(layout)));
+  }
+  res.json(getLayout().sizes);
+});
+
+// Best free spots for a bin. Body: { id } for a saved bin, and/or a draft { name, tags, items, size, ... }
+api.post('/layout/suggest', (req, res) => {
+  const layout = getLayout();
+  if (!layout.racks.length) return res.status(400).json({ error: 'Set up your racks first (Layout)' });
+  const bins = layoutBins();
+  const id = Number(req.body.id) || 0;
+  const saved = bins.find(b => b.id === id);
+  const draft = req.body.draft || {};
+  const target = {
+    ...(saved || {}), id,
+    ...['name', 'description', 'tags', 'size'].reduce((o, k) => (draft[k] !== undefined ? { ...o, [k]: String(draft[k]) } : o), {}),
+    ...(Array.isArray(draft.items) ? { items: draft.items.map(i => ({ name: String(i?.name || '') })) } : {}),
+  };
+  res.json(Layout.suggest(layout, bins, target, 3));
+});
+
+api.post('/layout/plan', (req, res) => {
+  const layout = getLayout();
+  if (!layout.racks.length) return res.status(400).json({ error: 'Set up your racks first' });
+  res.json(Layout.plan(layout, layoutBins(), req.body.mode === 'all' ? 'all' : 'unplaced'));
+});
+
+api.post('/bins/:id/location', (req, res) => {
+  const id = Number(req.params.id);
+  if (!q.getBin.get(id)) return res.status(404).json({ error: 'Not found' });
+  const c = cleanBin(req.body);
+  q.setLocation.run({ id, rack: c.rack, shelf: c.shelf, position: c.position });
+  res.json(fullBin(id));
+});
+
+// Apply a plan's moves atomically; refuse if it would put two bins in one spot
+api.post('/layout/apply', (req, res) => {
+  const layout = getLayout();
+  const moves = Array.isArray(req.body.moves) ? req.body.moves : [];
+  const valid = new Set(Layout.listSlots(layout).map(s => s.key));
+  tx(() => {
+    for (const m of moves) {
+      const id = Number(m.id);
+      if (!q.getBin.get(id)) continue;
+      const c = cleanBin(m.to || {});
+      if ((c.rack || c.shelf || c.position) && !valid.has(Layout.slotKey(c.rack, c.shelf, c.position))) {
+        throw Object.assign(new Error('The layout changed since this plan was made. Make a new plan.'), { status: 409 });
+      }
+      q.setLocation.run({ id, rack: c.rack, shelf: c.shelf, position: c.position });
+    }
+    const { inSlot } = Layout.occupancy(layout, layoutBins());
+    const moved = new Set(moves.map(m => Number(m.id)));
+    for (const list of inSlot.values()) if (list.length > 1 && list.some(b => moved.has(b.id))) {
+      throw Object.assign(new Error(`${list.map(b => b.code).join(' and ')} would share a spot. Make a new plan.`), { status: 409 });
+    }
+  });
+  res.json({ moved: moves.map(m => Number(m.id)) });
 });
 
 api.post('/bins', (req, res) => {

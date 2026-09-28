@@ -196,3 +196,80 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 1
 .ai-busy svg { color: var(--accent); animation: ai-pulse 1.2s ease-in-out infinite; }
 @keyframes ai-pulse { 50% { opacity: .35; transform: scale(.85); } }
 .hint svg { vertical-align: -3px; color: var(--accent); }
+
+/* racks / layout */
+.top-nav { display: flex; gap: 2px; }
+body.no-scroll { overflow: hidden; }
+.sheet-wrap { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.45); display: flex; align-items: flex-end; justify-content: center; }
+.sheet {
+  width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; background: var(--surface);
+  border-radius: 18px 18px 0 0; padding: 6px 16px calc(18px + env(safe-area-inset-bottom));
+}
+@media (min-width: 600px) { .sheet-wrap { align-items: center; } .sheet { border-radius: 18px; } }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; position: sticky; top: -6px; background: var(--surface); padding-top: 6px; z-index: 1; }
+.sheet-head h2 { font-size: 18px; margin: 8px 0; }
+.sheet .field { margin-bottom: 14px; }
+.sheet .lbl, .sheet .form label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 6px; }
+.rule { display: grid; gap: 6px; }
+.rule .radio, .rule .check, label.check { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 400 !important; color: var(--text) !important; margin: 0 !important; }
+.rule input { width: 18px; height: 18px; accent-color: var(--accent); }
+.rule-sizes { display: none; gap: 6px; padding: 2px 0 4px 26px; flex-direction: column; }
+.rule.only .rule-sizes { display: flex; }
+.rule-tag { font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-left: 6px; color: var(--text); }
+.chips.wrap { flex-wrap: wrap; overflow: visible; margin-bottom: 0; }
+.chip small { color: var(--muted); font-weight: 400; }
+.chip.on small { color: inherit; opacity: .75; }
+.chip.add { border-style: dashed; display: inline-flex; align-items: center; gap: 4px; }
+.chip.add svg { width: 14px; height: 14px; }
+label.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 400; color: var(--text); margin: 0; }
+label.chip:has(input:checked) { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+label.chip input { position: absolute; opacity: 0; pointer-events: none; }
+#newSizeForm { margin-top: 8px; }
+#newSizeForm input { min-width: 0; }
+.label-row { display: flex !important; justify-content: space-between; align-items: center; }
+.label-row .link-btn { font-size: 13px; padding: 0; display: inline-flex; gap: 4px; align-items: center; }
+.label-row .link-btn svg { color: var(--accent); }
+.bin-meta { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.bin-meta .link-btn { font-size: 14px; padding: 0; }
+
+.layout-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.layout-head h2 { margin: 0; }
+.rack h3 > span { display: flex; align-items: center; }
+.shelves { display: grid; gap: 6px; }
+.shelf { display: flex; gap: 6px; align-items: stretch; }
+.shelf-label {
+  flex: none; width: 34px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 0; color: var(--text);
+}
+.shelf-label small { font-size: 9px; color: var(--muted); line-height: 1.1; text-align: center; word-break: break-all; }
+.cells { flex: 1; min-width: 0; display: grid; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
+.cell {
+  position: relative; min-height: 64px; border-radius: 8px; padding: 6px 7px; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; justify-content: center; min-width: 0; text-decoration: none; font-size: 12px;
+}
+.cell.bin { background: var(--band); color: var(--band-ink); border: 1px solid var(--band); }
+.cell.bin .c-code { font-size: 10px; opacity: .7; letter-spacing: .04em; }
+.cell.bin .c-name { font-weight: 650; line-height: 1.2; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.cell .c-size { position: absolute; top: 4px; right: 5px; font-size: 9px; font-weight: 700; background: var(--accent); color: var(--accent-ink); border-radius: 4px; padding: 0 3px; }
+.cell.clash { outline: 2px solid var(--danger); outline-offset: -2px; }
+.cell .c-clash { position: absolute; bottom: 4px; right: 5px; font-size: 10px; font-weight: 700; color: #fff; background: var(--danger); border-radius: 4px; padding: 0 4px; }
+.cell.empty { background: none; border: 1.5px dashed var(--line); color: var(--muted); align-items: center; }
+.cell.empty .c-pos { font-size: 13px; }
+.cell.empty .c-rule { font-size: 10px; font-weight: 700; color: var(--text); }
+.cell.empty.off { background: repeating-linear-gradient(135deg, var(--bg) 0 6px, transparent 6px 12px); border-style: solid; }
+.theme { font-size: 12px; color: var(--muted); padding: 0 0 4px 40px; margin-top: -2px; }
+.plan-group h4 .theme { display: inline; padding: 0; margin-left: 6px; font-weight: 400; }
+.plan-group { border-top: 1px solid var(--line); padding: 10px 0 6px; }
+.plan-group h4 { margin: 0 0 6px; font-size: 14px; }
+.plan-move { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 14px; flex-wrap: wrap; }
+.plan-move .pm-name { flex: 1; min-width: 120px; }
+.picks { display: grid; gap: 10px; }
+.pick { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+.pick .pick-body { flex: 1; min-width: 0; font-size: 14px; }
+.pick .btn { min-height: 40px; padding: 8px 14px; flex: none; }
+.size-row { display: grid; grid-template-columns: 1fr 1fr 36px 36px; gap: 6px; margin-bottom: 8px; }
+.size-row input { width: 100%; min-width: 0; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-size: 15px; }
+.size-row .rm { height: 42px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; color: var(--muted); }
+.size-row .rm:disabled { opacity: .35; }
+.sheet .form input[type=text], .sheet .form input[type=number] { width: 100%; padding: 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-size: 16px; }
+[hidden] { display: none !important; }

@@ -7,6 +7,7 @@ Self-hosted storage bin inventory for Unraid (or any Docker host).
 - Prints **4×6 in shipping labels** (PDF, one bin per page) with the location in large type, the description, and a QR code
 - Scanning the QR code with a phone camera opens that bin's full contents list and photos
 - Search across bins *and* the items inside them ("where's the HDMI cable?")
+- **Rack layout**: describe your racks, shelves and positions, and it suggests where each bin should go, keeping similar bins together and respecting which bin sizes fit where
 - Optional **local AI** (Ollama): looks at a bin's photos, writes the description and adds search tags, all on your own server
 
 Data (SQLite database + photos) lives in `/data`.
@@ -91,6 +92,27 @@ An 8 GB card (e.g. RTX 2070/2080) runs `qwen2.5vl:7b` fully on the GPU: set `OLL
 Model choices: `gemma3:4b` (default, ~3.5 GB, OK on CPU), `qwen2.5vl:7b` (better at reading labels and small parts, ~6 GB, best with a GPU),
 `llava-phi3` (small). Any Ollama model that accepts images will work; set `OLLAMA_MODEL` to its name.
 Photos in HEIC that the phone couldn't convert are skipped (the app normally uploads JPEGs).
+
+## Rack layout and bin sizes
+
+Tap the **rack icon** in the top bar.
+
+1. **Set up**: enter how many racks you have, shelves per rack and positions per shelf. Choose letters or numbers for rack names,
+   and whether shelf 1 is the top or bottom shelf. Every rack, shelf and position can be adjusted afterwards: rename a rack
+   (its bins follow), change a shelf's number of positions, or add and delete racks.
+2. **Bin sizes**: make presets for the containers you actually use (e.g. *Shoebox 13x8x5*, *27 gal tote 30x20x15*). Pick one
+   when creating a bin, or add a new preset right from the bin form with **+ New size**.
+3. **Size rules**: tap a rack's **Edit**, a **shelf number**, or an **empty position** to choose *Any size*, *Only these sizes*,
+   or *Don't use*. A position gets whatever all three levels allow, so "bottom shelf: totes only" plus "position 3: don't use" works as expected.
+
+**Suggestions** look at each bin's tags (including AI tags), name and contents, and find free positions that fit its size next to the most similar bins:
+- On a bin: **Find a spot** / **Suggest a better spot** moves it with one tap.
+- In the bin form: **Suggest a spot** fills in the location before you save, even for a new bin.
+- **Place unplaced**: every bin without a valid spot (no location, not in the layout, or double-booked) goes next to similar bins. Nothing else moves.
+- **Reorganize all**: plans a fresh layout where each group of related bins gets its own shelf, preferring shelves limited to that
+  group's size (totes go on the totes-only shelf). You see every move, grouped by shelf with its theme, before anything changes.
+
+Moving a bin changes the location printed on its label, so after moving you get a button to reprint just the affected labels.
 
 ## Printing labels
 

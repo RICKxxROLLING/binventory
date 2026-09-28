@@ -5,7 +5,7 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
-COPY server.js auth.js ./
+COPY server.js auth.js layout.js ./
 COPY public ./public
 RUN mkdir -p /data
 VOLUME /data

@@ -176,7 +176,8 @@ async function viewBin(id) {
   $app.innerHTML = `
     <div class="detail">
       <div class="band">${(locs.length ? locs : [['LOCATION', 'Unassigned']]).map(([k, v]) => `<div><small>${k}</small><strong>${esc(v)}</strong></div>`).join('')}</div>
-      <div class="code">${esc(b.code)}</div>
+      <div class="bin-meta"><span class="code">${esc(b.code)}${b.size ? ` · ${esc(b.size)}` : ''}</span>
+        ${cfg.hasLayout ? `<button class="link-btn" id="findSpot">${b.rack ? 'Suggest a better spot' : 'Find a spot'}</button>` : ''}</div>
       <h1>${esc(b.name || 'Untitled bin')}</h1>
       ${b.description ? `<p class="desc">${esc(b.description)}</p>` : '<div style="height:12px"></div>'}
 
@@ -218,6 +219,8 @@ async function viewBin(id) {
     </div>`;
 
   document.getElementById('print').onclick = () => printLabels([b.id]);
+  const $find = document.getElementById('findSpot');
+  if ($find) $find.onclick = () => suggestSheet({ id: b.id });
   document.querySelectorAll('.gallery img').forEach(img => img.onclick = () => lightbox(img.src));
   document.querySelectorAll('a.tag').forEach(t => t.onclick = () => { state.q = t.dataset.tag; });
   document.getElementById('addPhoto').onchange = async e => {
@@ -274,7 +277,7 @@ function photoTile(p) {
 async function viewEdit(id) {
   const isNew = !id;
   const [b, locs, cfg] = await Promise.all([
-    isNew ? { name: '', description: '', rack: '', shelf: '', position: '', notes: '', tags: '', items: [], photos: [] } : api(`/bins/${id}`),
+    isNew ? { name: '', description: '', rack: '', shelf: '', position: '', notes: '', tags: '', size: '', items: [], photos: [] } : api(`/bins/${id}`),
     api('/locations'),
     getConfig(),
   ]);
@@ -286,7 +289,12 @@ async function viewEdit(id) {
     <form class="form" id="form" autocomplete="off">
       <h2 style="margin:0 0 14px">${isNew ? 'New bin' : `Edit ${esc(b.code)}`}</h2>
       <div class="field">
-        <label>Location</label>
+        <label>Bin size</label>
+        <div id="sizePick"></div>
+        <input type="hidden" name="size" value="${esc(b.size || '')}">
+      </div>
+      <div class="field">
+        <label class="label-row">Location ${locs.hasLayout ? `<button type="button" class="link-btn" id="suggestLoc">${icons.spark} Suggest a spot</button>` : ''}</label>
         <div class="grid3">
           <input type="text" name="rack" placeholder="Rack" value="${esc(b.rack)}" list="racks">
           <input type="text" name="shelf" placeholder="Shelf" value="${esc(b.shelf)}" list="shelves">
@@ -328,6 +336,18 @@ async function viewEdit(id) {
       <a class="btn" href="${isNew ? '#/' : `#/bin/${id}`}">Cancel</a>
       <button class="btn primary" id="save">${isNew ? 'Create bin' : 'Save'}</button>
     </div>`;
+
+  const $size = $app.querySelector('input[name=size]');
+  sizePicker(document.getElementById('sizePick'), locs.sizes, b.size || '', v => { $size.value = v; });
+  const $suggest = document.getElementById('suggestLoc');
+  if ($suggest) $suggest.onclick = () => {
+    const f = Object.fromEntries(new FormData(document.getElementById('form')));
+    const draft = { name: f.name, description: f.description, tags: f.tags, size: f.size, items: items.filter(i => String(i.name).trim()) };
+    suggestSheet({ id: isNew ? 0 : id, draft, onPick: p => {
+      for (const k of ['rack', 'shelf', 'position']) $app.querySelector(`input[name=${k}]`).value = p[k];
+      toast(`Location set to ${p.rack}-${p.shelf}-${p.position}`);
+    } });
+  };
 
   const $items = document.getElementById('items');
   function renderItems() {
@@ -468,12 +488,15 @@ async function renderAiSettings() {
 // ---------- router ----------
 async function route() {
   const h = location.hash.replace(/^#/, '') || '/';
+  document.querySelectorAll('.sheet-wrap').forEach(el => el.remove());
+  document.body.classList.remove('no-scroll');
   window.scrollTo(0, 0);
   let m;
   try {
     if (h === '/' || h === '') return await viewList();
     if (h === '/new') return await viewEdit(null);
     if (h === '/settings') return await viewSettings();
+    if (h === '/layout') return await viewLayout();
     if ((m = h.match(/^\/bin\/(\d+)\/edit$/))) return await viewEdit(Number(m[1]));
     if ((m = h.match(/^\/bin\/(\d+)$/))) { state.selecting = false; return await viewBin(Number(m[1])); }
     location.hash = '#/';
