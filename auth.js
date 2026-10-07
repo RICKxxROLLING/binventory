@@ -18,7 +18,7 @@ const MAX_FAILS = 10;
 const LOCK_MS = 15 * 60 * 1000;
 
 // Reachable without logging in (login page styling, PWA icon/manifest, health check)
-const PUBLIC_PATHS = new Set(['/healthz', '/login', '/logout', '/icon.svg', '/icon.png', '/manifest.webmanifest']);
+const PUBLIC_PATHS = new Set(['/healthz', '/login', '/logout', '/icon.svg', '/icon.png', '/manifest.webmanifest', '/scan.webmanifest']);
 
 function isPrivateIp(ip) {
   ip = String(ip || '').replace(/^::ffff:/i, '').toLowerCase();
@@ -131,11 +131,12 @@ function setupAuth(app, { dataDir }) {
     const payload = Buffer.from(`${USER}|${Date.now() + days * 864e5}`).toString('base64url');
     return `${payload}.${sign(payload)}`;
   }
+  // Returns the session's expiry time (ms), or 0 if the cookie isn't a valid live session
   function validToken(tok) {
     const [payload, sig] = String(tok || '').split('.');
-    if (!payload || !sig || !safeEqual(sig, sign(payload))) return false;
+    if (!payload || !sig || !safeEqual(sig, sign(payload))) return 0;
     const [user, exp] = Buffer.from(payload, 'base64url').toString().split('|');
-    return user === USER && Number(exp) > Date.now();
+    return user === USER && Number(exp) > Date.now() ? Number(exp) : 0;
   }
   function readCookie(req) {
     for (const part of String(req.headers.cookie || '').split(';')) {
@@ -195,7 +196,14 @@ function setupAuth(app, { dataDir }) {
   });
 
   app.use((req, res, next) => {
-    if (PUBLIC_PATHS.has(req.path) || validToken(readCookie(req)) || basicOk(req)) return next();
+    if (PUBLIC_PATHS.has(req.path)) return next();
+    const exp = validToken(readCookie(req));
+    if (exp) {
+      // Sliding session: a device in regular use (e.g. a wall-mounted scan station) never gets logged out
+      if (exp - Date.now() < days * 864e5 / 2) res.append('Set-Cookie', cookieHeader(req, makeToken(), days * 86400));
+      return next();
+    }
+    if (basicOk(req)) return next();
     if (req.path.startsWith('/api/') || req.path.startsWith('/photos/')) {
       return res.status(401).json({ error: 'Sign in required', login: true });
     }

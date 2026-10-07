@@ -21,7 +21,7 @@ async function api(path, opts = {}) {
 }
 
 let configP;
-const getConfig = () => (configP ||= api('/config').catch(e => { configP = null; throw e; }));
+const getConfig = () => configP || (configP = api('/config').catch(e => { configP = null; throw e; }));
 
 let toastTimer;
 function toast(msg) {
@@ -449,6 +449,10 @@ async function viewSettings() {
       <div class="hint" style="margin:0">${cfg.auth.enabled
         ? `Signed in as <b>${esc(cfg.auth.user)}</b>. Login is required and sessions last ${cfg.auth.days} days per device (changing <code>AUTH_PASS</code> signs every device out).`
         : 'No login set, so only devices on your home network (or Tailscale) can open Binventory. To reach it from outside, set <code>AUTH_USER</code> and <code>AUTH_PASS</code> on the container.'}</div>
+    </div>
+    <div class="section">
+      <h3>Scan station <a class="btn" href="/scan.html" style="min-height:36px;padding:6px 12px">Open</a></h3>
+      <div class="hint" style="margin:0">A full-screen page for a wall-mounted tablet with a Bluetooth barcode scanner: scan any bin label and its location, contents and photo come up, then it returns to “ready” by itself. It also catches old labels and offers to print a new one. Open <code>/scan.html</code> on the tablet and add it to the home screen.</div>
     </div>
     <div class="section" id="aiSettings">
       <h3>Local AI</h3>

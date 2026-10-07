@@ -622,6 +622,15 @@ api.post('/bins', (req, res) => {
   res.status(201).json(fullBin(id));
 });
 
+// Scan station: find a bin by its code (BIN-0001)
+api.get('/lookup/:code', (req, res) => {
+  const row = q.getBinByCode.get(String(req.params.code).trim());
+  if (!row) return res.status(404).json({ error: `No bin ${req.params.code}` });
+  const bin = fullBin(row.id);
+  bin.url = binUrl(req, bin);
+  res.json(bin);
+});
+
 api.get('/bins/:id', (req, res) => {
   const bin = fullBin(req.params.id);
   if (!bin) return res.status(404).json({ error: 'Not found' });

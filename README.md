@@ -136,6 +136,33 @@ Moving a bin changes the location printed on its label, so after moving you get 
   so the logo doesn't affect scanning. With an unusually long `BASE_URL` (over ~70 characters) the logo is left out to keep the code easy to scan.
 - On a phone: open the PDF → Share → Print (AirPrint), or send it to a computer with the label printer.
 
+## Scan station (wall-mounted tablet + barcode scanner)
+
+`/scan.html` is a full-screen page for an always-on tablet next to your racks. Scan any bin label with a Bluetooth barcode
+scanner and the bin's location (huge), contents, photo and tags come up, then it goes back to *Scan a bin label* after 90 seconds
+(`/scan.html?idle=60` to change). Old labels get flagged with a **Print new label** button. It runs on old iPads (iOS 12+).
+
+**Scanner.** It must read **QR codes (2D)**; a 1D-only scanner can't read the labels. Use **Bluetooth (HID / keyboard) mode**.
+The 2.4 GHz/433 MHz USB dongle mode doesn't work with an iPad. In the scanner's manual, scan the setup codes for:
+- Bluetooth HID mode, then pair it in the iPad's **Settings → Bluetooth**
+- **Enter / CR suffix** after each scan (usually the default)
+- **US keyboard layout**
+- the longest sleep timeout (or "never"), so the first scan after a quiet spell isn't lost while it reconnects
+
+There's no text box to tap: the page listens for the scanner's keystrokes, so the on-screen keyboard never appears.
+
+**iPad.**
+1. Open `http://<unraid-ip>:8080/scan.html` in Safari (the local address keeps working when the internet is down) and sign in.
+   Sessions renew themselves while in use, so it stays signed in.
+2. **Share → Add to Home Screen**, then open it from the home screen (full screen, no Safari bars).
+3. **Settings → Display & Brightness → Auto-Lock → Never**, and keep it plugged in. Turn brightness down a bit.
+4. Lock it to the page: **Settings → Accessibility → Guided Access → On** (set a passcode), open the Bin Scanner, triple-click the
+   home button, **Start**. Turn off **Settings → Notifications** for anything noisy.
+5. Tap the screen once after it starts if you want beeps (iPads only allow sound after a tap).
+
+The page reloads itself every 6 hours while idle to pick up updates. The main app needs iOS 13.4 or later; the scan station
+itself works on older iPads.
+
 ## QR codes and reaching the app away from home
 
 QR codes point at `BASE_URL/b/BIN-0001`. The link uses the bin **code**, not its database row, so it keeps working after you edit a bin.

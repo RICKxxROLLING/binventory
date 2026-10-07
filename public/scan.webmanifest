@@ -1,0 +1,11 @@
+{
+  "name": "Bin Scanner",
+  "short_name": "Bin Scanner",
+  "start_url": "/scan.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#0d0f12",
+  "theme_color": "#111418",
+  "icons": [{ "src": "/icon.png", "sizes": "512x512", "type": "image/png" }]
+}
